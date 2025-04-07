@@ -9,6 +9,7 @@ dependencies = [
     "ipykernel>=6.29.5",
     "ipython>=9.0.2",
     "ipywidgets>=8.1.5",
+    "jupyter-ai[all]>=2.31.2",
     "mss>=10.0.0",
     "notebook>=7.3.3",
     "opencv-python>=4.11.0.86",
