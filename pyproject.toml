@@ -4,4 +4,8 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "cython>=3.0.12",
+    "opencv-python>=4.11.0.86",
+    "python-xlib>=0.33",
+]
