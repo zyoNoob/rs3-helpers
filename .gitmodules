@@ -1,0 +1,3 @@
+[submodule "x11-window-interactor"]
+	path = x11-window-interactor
+	url = git@github.com:zyoNoob/x11-window-interactor.git
