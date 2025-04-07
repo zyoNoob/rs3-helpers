@@ -6,6 +6,9 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "cython>=3.0.12",
+    "ipykernel>=6.29.5",
+    "ipython>=9.0.2",
+    "ipywidgets>=8.1.5",
     "opencv-python>=4.11.0.86",
     "python-xlib>=0.33",
 ]
