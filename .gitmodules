@@ -1,3 +1,6 @@
 [submodule "x11-window-interactor"]
 	path = x11-window-interactor
 	url = git@github.com:zyoNoob/x11-window-interactor.git
+[submodule "scale-invariant-template-matching"]
+	path = scale-invariant-template-matching
+	url = git@github.com:zyoNoob/scale-invariant-template-matching.git
