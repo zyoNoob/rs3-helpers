@@ -13,6 +13,7 @@ dependencies = [
     "mss>=10.0.0",
     "notebook>=7.3.3",
     "opencv-contrib-python",
+    "pynput>=1.8.1",
     "python-xlib>=0.33",
 ]
 
