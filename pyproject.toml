@@ -5,10 +5,17 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "catppuccin-jupyterlab>=0.2.4",
     "ipykernel>=6.29.5",
     "ipython>=9.0.2",
     "ipywidgets>=8.1.5",
+    "jupyter-ai[all]>=2.31.2",
     "mss>=10.0.0",
-    "opencv-python>=4.11.0.86",
+    "notebook>=7.3.3",
+    "opencv-contrib-python",
+    "pynput>=1.8.1",
     "python-xlib>=0.33",
 ]
+
+[tool.uv.sources]
+opencv-contrib-python = { url = "https://github.com/zyoNoob/scale-invariant-template-matching/raw/refs/heads/main/whl/opencv_contrib_python-4.11.0.86-cp313-cp313-linux_x86_64.whl" }
