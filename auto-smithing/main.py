@@ -1,3 +1,4 @@
+import re
 import cv2
 import numpy as np
 import time
@@ -261,7 +262,7 @@ def smith(item, tier, interactor_instance):
             click_x, click_y = randomize_click_position(bar_x_abs, bar_y_abs, bar_w, bar_h, shape='rectangle', roi_diminish=2)
             interactor_instance.click(click_x, click_y) # Use passed interactor
             print(f"Superheating bar at ({click_x}, {click_y})")
-            time.sleep(random.uniform(12, 12.6))  # Wait for superheat cooldown/action
+            time.sleep(random.uniform(13.2, 13.8))  # Wait for superheat cooldown/action
         else:
             print("No more bars found in bagpack or script stopped/paused. Ending superheat loop.")
             break  # Exit superheat loop if no bars found or script stopped/paused
@@ -274,85 +275,190 @@ def get_crafting_requests():
     crafting_queue.clear()  # Clear previous queue if any
     total_tasks = 0 # Keep track of total tasks added
 
+    # --- Mode Selection ---
     while True:
-        print("\n--- New Crafting Request ---")
-        # Get Item
-        print("Available items:", ", ".join(available_items))
-        item = input(f"Enter item to craft (or type 'done' to finish): ").lower().strip()
-        if item == 'done':
+        mode_choice = input("Choose input mode: (1) Interactive or (2) Compact? [1]: ").strip()
+        if mode_choice == '2':
+            input_mode = 'compact'
             break
-        if item not in available_items:
-            print("Invalid item. Please choose from the list.")
-            continue
-
-        # Get Target Tier
-        print("Available tiers:", ", ".join(ordered_tiers))
-        target_tier = input(f"Enter target tier for {item}: ").lower().strip()
-        if target_tier not in ordered_tiers:
-            print("Invalid tier. Please choose from the list.")
-            continue
-
-        # Get Quantity
-        while True:
-            try:
-                quantity_str = input(f"How many {item} ({target_tier}) do you want to craft? (default: 1): ").strip()
-                if not quantity_str:
-                    quantity = 1
-                    break
-                quantity = int(quantity_str)
-                if quantity > 0:
-                    break
-                else:
-                    print("Quantity must be a positive number.")
-            except ValueError:
-                print("Invalid input. Please enter a number.")
-
-        # Handle Recursive Crafting
-        start_tier = "base"
-        is_recursive = False
-        target_tier_index = ordered_tiers.index(target_tier)
-
-        if target_tier_index > 0:  # Only ask if target is not 'base'
-            recursive_choice = input(f"Craft {item} up to {target_tier} recursively? (yes/no, default: yes): ").lower().strip()
-            if recursive_choice in ['', 'yes', 'y']:
-                is_recursive = True
-                start_tier_choice = input(f"Start recursive crafting from which tier? (default: base): ").lower().strip()
-                if start_tier_choice in ordered_tiers:
-                    if ordered_tiers.index(start_tier_choice) > target_tier_index:
-                        print(f"Start tier '{start_tier_choice}' cannot be after target tier '{target_tier}'. Defaulting to 'base'.")
-                        start_tier = "base"
-                    else:
-                        start_tier = start_tier_choice
-                elif start_tier_choice == "":
-                    start_tier = "base"
-                else:
-                    print("Invalid start tier. Defaulting to 'base'.")
-                    start_tier = "base"
-            else:
-                is_recursive = False  # Explicitly set to false if user says no
-
-        # Build and add tasks to the main queue
-        tasks_for_this_request = []
-        if is_recursive:
-            start_tier_index = ordered_tiers.index(start_tier)
-            for i in range(start_tier_index, target_tier_index + 1):
-                current_tier = ordered_tiers[i]
-                tasks_for_this_request.append((item, current_tier))
-                print(f"Added task step: Craft {item} - {current_tier}")
+        elif mode_choice in ['', '1']:
+            input_mode = 'interactive'
+            break
         else:
-            tasks_for_this_request.append((item, target_tier))
-            print(f"Added task step: Craft {item} - {target_tier}")
-
-        # Add the sequence of tasks 'quantity' times
-        for _ in range(quantity):
-            for task in tasks_for_this_request:
-                crafting_queue.append(task)
-                total_tasks += 1
-
-        print(f"Added {quantity} x {item} ({target_tier}) request(s) to the queue.")
+            print("Invalid choice. Please enter 1 or 2.")
+    print(f"Selected mode: {input_mode.capitalize()}")
+    # --- End Mode Selection ---
 
 
-    print(f"\n--- Crafting Queue ({total_tasks} total tasks) ---")
+    if input_mode == 'interactive':
+        # --- Interactive Mode ---
+        while True:
+            print("\n--- New Crafting Request ---")
+            # Get Item
+            print("Available items:", ", ".join(available_items))
+            item = input(f"Enter item to craft (or type 'done' to finish): ").lower().strip()
+            if item == 'done':
+                break
+            if item not in available_items:
+                print("Invalid item. Please choose from the list.")
+                continue
+
+            # Get Target Tier
+            print("Available tiers:", ", ".join(ordered_tiers))
+            target_tier = input(f"Enter TARGET tier for {item}: ").lower().strip()
+            if target_tier not in ordered_tiers:
+                print("Invalid tier. Please choose from the list.")
+                continue
+
+            # Get Quantity
+            while True:
+                try:
+                    quantity_str = input(f"How many {item} ({target_tier}) do you want to craft? (default: 1): ").strip()
+                    if not quantity_str:
+                        quantity = 1
+                        break
+                    quantity = int(quantity_str)
+                    if quantity > 0:
+                        break
+                    else:
+                        print("Quantity must be a positive number.")
+                except ValueError:
+                    print("Invalid input. Please enter a number.")
+
+            # Handle Recursive Crafting (Based on what tier user HAS)
+            have_tier = None # Default: User has nothing, start from base
+            is_recursive = False
+            target_tier_index = ordered_tiers.index(target_tier)
+            have_tier_index = -1 # Index of the tier the user HAS (-1 means none/base)
+
+            if target_tier_index > 0: # Only ask if target is not 'base'
+                recursive_choice = input(f"Is this a recursive craft (i.e., do you already have a lower tier of {item})? (yes/no, default: no): ").lower().strip()
+                if recursive_choice in ['yes', 'y']:
+                    is_recursive = True
+                    have_tier_choice = input(f"Which tier of {item} do you currently HAVE? (leave blank if none/base): ").lower().strip()
+                    if have_tier_choice == "":
+                        have_tier_index = -1 # Start from base implicitly
+                        print("Okay, will craft all tiers up to target.")
+                    elif have_tier_choice in ordered_tiers:
+                        temp_have_index = ordered_tiers.index(have_tier_choice)
+                        if temp_have_index >= target_tier_index:
+                             print(f"Have tier '{have_tier_choice}' cannot be the same or after target tier '{target_tier}'. Assuming you have none.")
+                             have_tier_index = -1
+                        else:
+                             have_tier = have_tier_choice
+                             have_tier_index = temp_have_index
+                             print(f"Okay, will craft tiers from {ordered_tiers[have_tier_index + 1]} up to {target_tier}.")
+                    else:
+                        print("Invalid have tier. Assuming you have none.")
+                        have_tier_index = -1
+                # No 'else' needed, is_recursive stays False if they say no or blank
+
+            # Build and add tasks to the main queue
+            tasks_for_this_request = []
+            start_crafting_index = have_tier_index + 1 # Craft the tier *after* the one they have
+            for i in range(start_crafting_index, target_tier_index + 1):
+                 current_tier_to_craft = ordered_tiers[i]
+                 tasks_for_this_request.append((item, current_tier_to_craft))
+                 print(f"  Added task step: Craft {item} - {current_tier_to_craft}")
+
+            # Add the sequence of tasks 'quantity' times
+            for _ in range(quantity):
+                for task in tasks_for_this_request:
+                    crafting_queue.append(task)
+                    total_tasks += 1
+
+            print(f"Added {quantity} x request(s) for {item} (up to {target_tier}) to the queue.")
+        # --- End Interactive Mode ---
+
+    elif input_mode == 'compact':
+        # --- Compact Mode ---
+        print("\n--- Compact Crafting Input ---")
+        print("Available Items:")
+        for i, item_name in enumerate(available_items):
+            print(f"  {i+1}: {item_name}")
+        print("\nAvailable Tiers:")
+        for i, tier_name in enumerate(ordered_tiers):
+             print(f"  {i+1}: {tier_name}")
+
+        print("\nEnter requests in the format: <item#> <target_tier#> [quantity] [h<have_tier#>]")
+        print("Example: '1 7 5 h2' -> 5x Item#1 to Tier#7, currently have Tier#2")
+        print("Example: '2 8 10' -> 10x Item#2 to Tier#8, currently have none (starts from base)")
+        print("Example: '3 5' -> 1x Item#3 to Tier#5, currently have none")
+        print("Enter 'done' when finished.")
+
+        while True:
+            user_input = input("> ").strip().lower()
+            if user_input == 'done':
+                break
+            if not user_input:
+                continue
+
+            # Basic parsing using regex, allows flexible spacing
+            # Format: item_num target_tier_num [quantity] [h<have_tier_num>]
+            match = re.match(r"^\s*(\d+)\s+(\d+)(?:\s+(\d+))?(?:\s+h(\d+))?\s*$", user_input)
+
+            if not match:
+                print("Invalid format. Use: <item#> <target_tier#> [quantity] [h<have_tier#>]")
+                continue
+
+            try:
+                item_num = int(match.group(1))
+                target_tier_num = int(match.group(2))
+                quantity = int(match.group(3) or 1) # Default quantity 1
+                have_tier_num = int(match.group(4)) if match.group(4) else 0 # 0 means none/base
+
+                # Validate numbers
+                if not (1 <= item_num <= len(available_items)):
+                    print(f"Invalid item number. Must be between 1 and {len(available_items)}.")
+                    continue
+                if not (1 <= target_tier_num <= len(ordered_tiers)):
+                    print(f"Invalid target tier number. Must be between 1 and {len(ordered_tiers)}.")
+                    continue
+                if quantity <= 0:
+                     print("Quantity must be positive.")
+                     continue
+                if not (0 <= have_tier_num <= len(ordered_tiers)):
+                     print(f"Invalid have tier number. Must be 0 (none) or between 1 and {len(ordered_tiers)}.")
+                     continue
+
+
+                item_index = item_num - 1
+                target_tier_index = target_tier_num - 1
+                have_tier_index = have_tier_num - 1 if have_tier_num > 0 else -1 # -1 for none/base
+
+                item = available_items[item_index]
+                target_tier = ordered_tiers[target_tier_index]
+
+                if have_tier_index >= target_tier_index:
+                     print(f"Error: Have tier ({ordered_tiers[have_tier_index]}) cannot be same or after target tier ({target_tier}).")
+                     continue
+
+                # Build and add tasks
+                tasks_for_this_request = []
+                start_crafting_index = have_tier_index + 1
+                for i in range(start_crafting_index, target_tier_index + 1):
+                    current_tier_to_craft = ordered_tiers[i]
+                    tasks_for_this_request.append((item, current_tier_to_craft))
+
+                # Add the sequence 'quantity' times
+                for _ in range(quantity):
+                    for task in tasks_for_this_request:
+                        crafting_queue.append(task)
+                        total_tasks += 1
+
+                have_tier_str = f", have {ordered_tiers[have_tier_index]}" if have_tier_index != -1 else ", have none"
+                print(f"  Added {quantity}x {item} up to {target_tier}{have_tier_str}. Steps: {[t[1] for t in tasks_for_this_request]}")
+
+
+            except (ValueError, IndexError) as e:
+                print(f"Error processing input: {e}. Please check format and numbers.")
+            except Exception as e: # Catch unexpected errors during parsing
+                 print(f"An unexpected error occurred: {e}")
+
+        # --- End Compact Mode ---
+
+    # --- Queue Summary (Common for both modes) ---
+    print(f"\n--- Crafting Queue Finalized ({total_tasks} total tasks) ---")
     # Displaying the full queue might be too long, maybe show a summary or first few
     if total_tasks > 20:
          print("(Showing first 20 tasks)")
@@ -360,12 +466,13 @@ def get_crafting_requests():
              if i >= 20:
                  break
              print(f"- {task_item} ({task_tier})")
+    elif total_tasks == 0:
+        print("(Queue is empty)")
     else:
         for task_item, task_tier in crafting_queue:
             print(f"- {task_item} ({task_tier})")
     print("------------------------------")
     return total_tasks > 0
-
 # --- End New Input and Queue Logic ---
 
 # --- Background Task Functions ---
@@ -381,7 +488,7 @@ def torstol_task(target_window_id):
     # --- End Initial Activation ---
     while script_running:
         try:
-            sleep_duration = random.uniform(340, 355)
+            sleep_duration = random.uniform(585, 600)
             start_time = time.time()
             while time.time() - start_time < sleep_duration:
                  if not script_running:
