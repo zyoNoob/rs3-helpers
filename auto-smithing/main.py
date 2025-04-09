@@ -229,7 +229,7 @@ def smith(item, tier, interactor_instance):
     x, y, w, h = rois["anvil"]
     click_x, click_y = randomize_click_position(x, y, w, h, shape='rectangle', roi_diminish=2)
     interactor_instance.click(click_x, click_y) # Use passed interactor
-    time.sleep(13.2)  # Wait for smithing on anvil
+    time.sleep(16.2)  # Wait for smithing on anvil
 
     # --- Superheat Loop ---
     while script_running and not script_paused:  # Check flags
@@ -262,7 +262,7 @@ def smith(item, tier, interactor_instance):
             click_x, click_y = randomize_click_position(bar_x_abs, bar_y_abs, bar_w, bar_h, shape='rectangle', roi_diminish=2)
             interactor_instance.click(click_x, click_y) # Use passed interactor
             print(f"Superheating bar at ({click_x}, {click_y})")
-            time.sleep(random.uniform(13.2, 13.8))  # Wait for superheat cooldown/action
+            time.sleep(random.uniform(16.2, 16.8))  # Wait for superheat cooldown/action
         else:
             print("No more bars found in bagpack or script stopped/paused. Ending superheat loop.")
             break  # Exit superheat loop if no bars found or script stopped/paused
@@ -547,32 +547,66 @@ def main_script(target_window_id):
     interactor_instance = X11WindowInteractor(window_id=target_window_id)
     print(f"Main script thread started (Interactor for window: {target_window_id}).")
 
-    print("Activating window and checking buffs...")
+    print("Activating window and ensuring Superheat Form is active...")
     interactor_instance.activate()
+    time.sleep(0.5) # Small delay after activation
 
-    try:
-        buff_img = interactor_instance.capture(rois["buff"])
-        if buff_img is None:
-            print("Error capturing buff ROI. Cannot check Superheat Form.")
-        else:
+    # --- Robust Superheat Form Check/Activation ---
+    max_retries = 3
+    superheat_active = False
+    for attempt in range(max_retries):
+        if not script_running: return # Stop if script was stopped externally
+        print(f"Superheat Form check (Attempt {attempt + 1}/{max_retries})...")
+        try:
+            buff_img = interactor_instance.capture(rois["buff"])
+            if buff_img is None:
+                print("Error capturing buff ROI. Retrying...")
+                time.sleep(1.5)
+                continue
+
             _, _, _, _, status = find_image(superheat_form_img, buff_img)
-            if status != 'Detected':
-                print("Superheat Form not detected. Activating...")
+
+            if status == 'Detected':
+                print("Superheat Form detected.")
+                superheat_active = True
+                break # Exit loop, buff is active
+            else:
+                print("Superheat Form not detected. Attempting activation...")
                 interactor_instance.send_key(superheat_form)
-                time.sleep(random.uniform(1.5, 2.0))
+                time.sleep(random.uniform(2.0, 2.5)) # Wait for activation animation/buff to appear
+
+                # Re-check after activation attempt
                 buff_img_after = interactor_instance.capture(rois["buff"])
                 if buff_img_after is None:
-                     print("Error capturing buff ROI after attempting activation.")
+                     print("Error capturing buff ROI after activation attempt. Retrying check...")
+                     time.sleep(1.5)
+                     continue
+
+                _, _, _, _, status_after = find_image(superheat_form_img, buff_img_after)
+                if status_after == 'Detected':
+                     print("Superheat Form activated successfully.")
+                     superheat_active = True
+                     break # Exit loop, buff is now active
                 else:
-                    _, _, _, _, status_after = find_image(superheat_form_img, buff_img_after)
-                    if status_after != 'Detected':
-                        print("Warning: Superheat Form still not detected after activation attempt.")
-                    else:
-                        print("Superheat Form activated successfully.")
-            else:
-                print("Superheat Form already active.")
-    except Exception as e:
-        print(f"Error during Superheat Form check: {e}")
+                    print("Superheat Form still not detected after activation attempt.")
+                    # Loop will continue for next retry
+
+        except Exception as e:
+            print(f"Error during Superheat Form check/activation: {e}. Retrying...")
+            time.sleep(2.0)
+
+        if not superheat_active and attempt < max_retries - 1:
+            print("Waiting before next check...")
+            time.sleep(random.uniform(2.0, 3.0))
+
+    if not superheat_active:
+        print("Failed to activate or verify Superheat Form after multiple attempts. Stopping script.")
+        # Optionally, signal the main thread or other threads if needed
+        # For now, just stopping this thread:
+        script_running = False # Ensure other loops stop
+        return # Stop main_script execution
+    # --- End Superheat Form Check ---
+
 
     print("Processing queue...")
     while script_running:
