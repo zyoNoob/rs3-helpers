@@ -19,7 +19,8 @@ from template_matching import ColorMatcher
 interactor = X11WindowInteractor()
 
 # Canny matcher
-matcher = ColorMatcher(num_scales=150, min_scale=0.5, max_scale=2.0, match_threshold=0.90)
+aggressive_matcher = ColorMatcher(num_scales=150, min_scale=0.5, max_scale=2.0, match_threshold=0.90)
+lineant_matcher = ColorMatcher(num_scales=150, min_scale=0.5, max_scale=2.0, match_threshold=0.60)
 
 # Global variable to control the start and stop of the script
 script_running = False
@@ -129,7 +130,7 @@ if RECALIBRATE:
     for i in rois:
         print(f"{i}_roi = {rois[i]}")
 
-def find_image(template_path, screenshot, scale=None):
+def find_image(template_path, screenshot, matcher=aggressive_matcher, scale=None):
     global template_scales
     if not os.path.exists(template_path):
         print(f"Error: Template image not found at {template_path}")
@@ -564,7 +565,7 @@ def main_script(target_window_id):
                 time.sleep(1.5)
                 continue
 
-            _, _, _, _, status = find_image(superheat_form_img, buff_img)
+            _, _, _, _, status = find_image(superheat_form_img, buff_img, lineant_matcher)
 
             if status == 'Detected':
                 print("Superheat Form detected.")
@@ -582,7 +583,7 @@ def main_script(target_window_id):
                      time.sleep(1.5)
                      continue
 
-                _, _, _, _, status_after = find_image(superheat_form_img, buff_img_after)
+                _, _, _, _, status_after = find_image(superheat_form_img, buff_img_after, lineant_matcher)
                 if status_after == 'Detected':
                      print("Superheat Form activated successfully.")
                      superheat_active = True
