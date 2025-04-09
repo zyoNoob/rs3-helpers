@@ -382,9 +382,10 @@ def get_crafting_requests():
              print(f"  {i+1}: {tier_name}")
 
         print("\nEnter requests in the format: <item#> <target_tier#> [quantity] [h<have_tier#>]")
-        print("Example: '1 7 5 h2' -> 5x Item#1 to Tier#7, currently have Tier#2")
-        print("Example: '2 8 10' -> 10x Item#2 to Tier#8, currently have none (starts from base)")
-        print("Example: '3 5' -> 1x Item#3 to Tier#5, currently have none")
+        print("Example: '1 7 5 h2' -> 5x Item#1 to Tier#7, you HAVE Tier#2 from the list (which is plus_1)")
+        print("Example: '2 8 10' -> 10x Item#2 to Tier#8, you HAVE none (starts from base)")
+        print("Example: '3 6' -> 1x Item#3 to Tier#6, you HAVE none")
+        print("*** Important: Use the number from the list for h<have_tier#>. 'h0' or omitting means you have none. ***")
         print("Enter 'done' when finished.")
 
         while True:
@@ -419,7 +420,7 @@ def get_crafting_requests():
                      print("Quantity must be positive.")
                      continue
                 if not (0 <= have_tier_num <= len(ordered_tiers)):
-                     print(f"Invalid have tier number. Must be 0 (none) or between 1 and {len(ordered_tiers)}.")
+                     print(f"Invalid have tier number. Must be 0 (none/omitted) or between 1 and {len(ordered_tiers)}.")
                      continue
 
 
@@ -643,7 +644,8 @@ def main_script(target_window_id):
 def on_press(key):
     global script_running, script_paused, interactor
     try:
-        if key == pkeyboard.KeyCode(char='-'):
+        # Check for F11 and F12 keys
+        if key == pkeyboard.Key.f11:  # F11 key to start/pause
             if not script_running:
                 if get_crafting_requests():
                     target_window_id = None
@@ -672,18 +674,19 @@ def on_press(key):
             else:
                 script_paused = not script_paused
                 print(f"Script {'paused' if script_paused else 'resumed'}.")
-        elif key == pkeyboard.KeyCode(char='='):
+        elif key == pkeyboard.Key.f12:  # F12 key to stop
             if script_running:
                 print("Stopping script immediately...")
                 script_running = False
                 script_paused = False
     except AttributeError:
+        # Usually happens with special keys that don't have a 'char' attribute, safe to ignore here.
         pass
 
 
 def start_listener():
-    print("Press '-' to configure and start/pause the script.")
-    print("Press '=' to stop the script immediately.")
+    print("Press F11 to configure and start/pause the script.")
+    print("Press F12 to stop the script immediately.")
     with pkeyboard.Listener(on_press=on_press) as listener:
         listener.join()
 
