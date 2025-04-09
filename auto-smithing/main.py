@@ -608,68 +608,75 @@ def torstol_task(target_window_id):
     interactor_instance = X11WindowInteractor(window_id=target_window_id)
     print(f"Torstol stick thread started (Interactor for window: {target_window_id}).")
 
-    # Calculate initial remaining sleep time
-    remaining_sleep = initial_torstol_wait
-    if remaining_sleep <= 0:
-        # If no initial wait, activate immediately (if script is running and not paused)
+    target_expiry_time = 0
+    next_interval = random.uniform(585, 600) # Default interval
+
+    # Calculate initial target expiry time
+    if initial_torstol_wait > 0:
+        target_expiry_time = time.time() + initial_torstol_wait
+        print(f"Torstol: Initial wait set. Next check/activation around {time.strftime('%H:%M:%S', time.localtime(target_expiry_time))}")
+    else:
+        # Activate immediately if script is running and not paused
         if script_running and not script_paused:
             print("Activating Initial Torstol Sticks...")
             interactor_instance.send_key(torstol_sticks)
             last_torstol_activation_time = time.time()
-            if not interruptible_sleep(random.uniform(0.6, 0.8)): return # Use interruptible sleep
+            # Use interruptible_sleep after activation
+            if not interruptible_sleep(random.uniform(0.6, 0.8)): return
+            target_expiry_time = last_torstol_activation_time + next_interval
+            print(f"Torstol: Initial activation done. Next activation around {time.strftime('%H:%M:%S', time.localtime(target_expiry_time))}")
+        elif script_running: # Started paused
+             last_torstol_activation_time = time.time() # Pretend it just activated
+             target_expiry_time = last_torstol_activation_time + next_interval
+             print(f"Torstol: Script started paused. Scheduling first activation around {time.strftime('%H:%M:%S', time.localtime(target_expiry_time))}")
         else:
-             # If starting paused, set activation time as if it just happened
-             last_torstol_activation_time = time.time()
-        remaining_sleep = random.uniform(585, 600) # Set timer for next activation
-
-    print(f"Torstol: Initial wait/sleep: {remaining_sleep:.1f} seconds.")
+             return # Script stopped before initial activation
 
     while script_running:
         try:
-            start_time = time.time()
-            pause_duration = 0
-            # --- Main Sleep Loop (already handles pauses correctly) ---
-            while time.time() - start_time < remaining_sleep:
+            # --- Main Sleep Loop using interruptible_sleep ---
+            now = time.time()
+            while now < target_expiry_time:
                 if not script_running:
-                    print("Torstol stick thread stopping.")
+                    print("Torstol stick thread stopping during wait.")
                     return
 
-                if script_paused:
-                    pause_start = time.time()
-                    print("Torstol task paused...")
-                    while script_paused:
-                        if not script_running:
-                             print("Torstol stick thread stopping during pause.")
-                             return
-                        time.sleep(0.2) # Keep short check sleep here
-                    pause_duration += time.time() - pause_start
-                    print(f"Torstol task resumed. Adjusted timer for pause duration ({pause_duration:.1f}s).")
-                    # Recalculate the effective start time after pause
-                    start_time = time.time() - (remaining_sleep - (time.time() - (start_time + pause_duration)))
+                # Calculate remaining time until expiry
+                remaining = target_expiry_time - now
+                # Sleep for a short interval or until expiry, whichever is less
+                sleep_duration = min(0.2, remaining)
 
-                time.sleep(0.2) # Keep short check sleep here
+                # Use interruptible_sleep for the main wait interval
+                if not interruptible_sleep(sleep_duration):
+                    # If sleep was interrupted by stop signal, exit
+                    return
+
+                # Update 'now' after sleeping
+                now = time.time()
             # --- End Main Sleep Loop ---
 
-            # Time is up, activate if still running and not paused
-            if script_running and not script_paused:
+
+            # Time is up, activate if still running (pause is handled by interruptible_sleep)
+            if script_running:
                 print("Activating Torstol Sticks...")
                 interactor_instance.send_key(torstol_sticks)
                 last_torstol_activation_time = time.time()
-                # Calculate sleep for the *next* cycle
-                remaining_sleep = random.uniform(585, 600)
-                print(f"Torstol: Next activation in ~{remaining_sleep:.1f} seconds.")
-            elif script_running and script_paused:
-                 print("Torstol activation due, but script is paused. Will activate on resume.")
-                 remaining_sleep = 0.1 # Set a tiny delay
+                # Use interruptible_sleep after activation
+                if not interruptible_sleep(random.uniform(0.6, 0.8)): return
 
-            elif not script_running:
+                # Calculate NEXT target expiry time
+                next_interval = random.uniform(585, 600)
+                target_expiry_time = last_torstol_activation_time + next_interval
+                print(f"Torstol: Next activation scheduled around {time.strftime('%H:%M:%S', time.localtime(target_expiry_time))}")
+            else:
                  print("Torstol stick thread stopping before activation.")
-                 return
+                 return # Script stopped
 
         except Exception as e:
             print(f"Error in torstol_task: {e}")
             print("Waiting before retrying loop...")
-            if not interruptible_sleep(5): return # Use interruptible sleep in except block
+            # Use interruptible sleep for the error wait
+            if not interruptible_sleep(5): return
 
     print("Torstol stick thread finished.")
 
@@ -683,58 +690,70 @@ def attraction_task(target_window_id):
     interactor_instance = X11WindowInteractor(window_id=target_window_id)
     print(f"Attraction potion thread started (Interactor for window: {target_window_id}).")
 
-    # Calculate initial remaining sleep time
-    remaining_sleep = initial_attraction_wait
-    if remaining_sleep <= 0:
+    target_expiry_time = 0
+    next_interval = random.uniform(880, 895) # Default interval
+
+    # Calculate initial target expiry time
+    if initial_attraction_wait > 0:
+        target_expiry_time = time.time() + initial_attraction_wait
+        print(f"Attraction: Initial wait set. Next check/activation around {time.strftime('%H:%M:%S', time.localtime(target_expiry_time))}")
+    else:
+        # Activate immediately if script is running and not paused
         if script_running and not script_paused:
             print("Activating Initial Attraction Potion...")
             interactor_instance.send_key(attraction_potion)
             last_attraction_activation_time = time.time()
-            if not interruptible_sleep(random.uniform(0.6, 0.8)): return # Use interruptible sleep
+            # Use interruptible_sleep after activation
+            if not interruptible_sleep(random.uniform(0.6, 0.8)): return
+            target_expiry_time = last_attraction_activation_time + next_interval
+            print(f"Attraction: Initial activation done. Next activation around {time.strftime('%H:%M:%S', time.localtime(target_expiry_time))}")
+        elif script_running: # Started paused
+             last_attraction_activation_time = time.time() # Pretend it just activated
+             target_expiry_time = last_attraction_activation_time + next_interval
+             print(f"Attraction: Script started paused. Scheduling first activation around {time.strftime('%H:%M:%S', time.localtime(target_expiry_time))}")
         else:
-            last_attraction_activation_time = time.time()
-        remaining_sleep = random.uniform(880, 895)
+            return # Script stopped before initial activation
 
-    print(f"Attraction: Initial wait/sleep: {remaining_sleep:.1f} seconds.")
 
     while script_running:
         try:
-            start_time = time.time()
-            pause_duration = 0
-            # --- Main Sleep Loop (already handles pauses correctly) ---
-            while time.time() - start_time < remaining_sleep:
-                 if not script_running:
-                     print("Attraction potion thread stopping.")
-                     return
+             # --- Main Sleep Loop using interruptible_sleep ---
+            now = time.time()
+            while now < target_expiry_time:
+                if not script_running:
+                    print("Attraction potion thread stopping during wait.")
+                    return
 
-                 if script_paused:
-                     pause_start = time.time()
-                     print("Attraction task paused...")
-                     while script_paused:
-                         if not script_running:
-                              print("Attraction potion thread stopping during pause.")
-                              return
-                         time.sleep(0.2) # Keep short check sleep here
-                     pause_duration += time.time() - pause_start
-                     print(f"Attraction task resumed. Adjusted timer for pause duration ({pause_duration:.1f}s).")
-                     start_time = time.time() - (remaining_sleep - (time.time() - (start_time + pause_duration)))
+                # Calculate remaining time until expiry
+                remaining = target_expiry_time - now
+                # Sleep for a short interval or until expiry, whichever is less
+                sleep_duration = min(0.2, remaining)
 
-                 time.sleep(0.2) # Keep short check sleep here
+                # Use interruptible_sleep for the main wait interval
+                if not interruptible_sleep(sleep_duration):
+                     # If sleep was interrupted by stop signal, exit
+                    return
+
+                # Update 'now' after sleeping
+                now = time.time()
             # --- End Main Sleep Loop ---
 
-            if script_running and not script_paused:
+
+            # Time is up, activate if still running
+            if script_running:
                 print("Activating Attraction Potion...")
                 interactor_instance.send_key(attraction_potion)
                 last_attraction_activation_time = time.time()
-                remaining_sleep = random.uniform(880, 895)
-                print(f"Attraction: Next activation in ~{remaining_sleep:.1f} seconds.")
-            elif script_running and script_paused:
-                 print("Attraction activation due, but script is paused. Will activate on resume.")
-                 remaining_sleep = 0.1
+                # Use interruptible_sleep after activation
+                if not interruptible_sleep(random.uniform(0.6, 0.8)): return
 
-            elif not script_running:
+                # Calculate NEXT target expiry time
+                next_interval = random.uniform(880, 895)
+                target_expiry_time = last_attraction_activation_time + next_interval
+                print(f"Attraction: Next activation scheduled around {time.strftime('%H:%M:%S', time.localtime(target_expiry_time))}")
+            else:
                  print("Attraction potion thread stopping before activation.")
-                 return
+                 return # Script stopped
 
         except Exception as e:
             print(f"Error in attraction_task: {e}")
