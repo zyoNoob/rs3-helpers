@@ -12,6 +12,9 @@ dependencies = [
     "jupyter-ai[all]>=2.31.2",
     "mss>=10.0.0",
     "notebook>=7.3.3",
-    "opencv-python>=4.11.0.86",
+    "opencv-contrib-python",
     "python-xlib>=0.33",
 ]
+
+[tool.uv.sources]
+opencv-contrib-python = { url = "https://github.com/zyoNoob/scale-invariant-template-matching/raw/refs/heads/main/whl/opencv_contrib_python-4.11.0.86-cp313-cp313-linux_x86_64.whl" }
