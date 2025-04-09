@@ -26,6 +26,14 @@ lineant_matcher = ColorMatcher(num_scales=150, min_scale=0.5, max_scale=2.0, mat
 script_running = False
 script_paused = False
 
+# --- New Buff Management Globals ---
+auto_buff_management = False
+initial_torstol_wait = 0 # Seconds
+initial_attraction_wait = 0 # Seconds
+last_torstol_activation_time = None
+last_attraction_activation_time = None
+# --- End New Buff Management Globals ---
+
 # Stores scales for all template matches
 template_scales = {}
 
@@ -187,9 +195,48 @@ def randomize_click_position(x, y, width, height, shape='rectangle', roi_diminis
 
     return int(click_x), int(click_y)
 
+def interruptible_sleep(duration, check_interval=0.1):
+    """ Sleeps for a given duration, but checks script_running and script_paused periodically.
+        Returns False if interrupted by script_running becoming False, True otherwise.
+    """
+    global script_running, script_paused
+    end_time = time.time() + duration
+    while time.time() < end_time:
+        if not script_running:
+            # print("Sleep interrupted by script stop.") # Optional: less verbose
+            return False # Indicate stop
+
+        # Handle pausing
+        paused_while_sleeping = False
+        while script_paused:
+            paused_while_sleeping = True
+            if not script_running:
+                 # print("Sleep interrupted by script stop during pause.") # Optional: less verbose
+                 return False # Indicate stop
+            time.sleep(check_interval) # Wait while paused
+
+        # Optional: Print resume message only if it was actually paused during this sleep call
+        # if paused_while_sleeping:
+        #    print("Resuming sleep...")
+
+        # Calculate remaining time to sleep for this interval, capped by end_time
+        current_time = time.time()
+        sleep_this_interval = min(check_interval, end_time - current_time)
+
+        if sleep_this_interval > 0:
+            time.sleep(sleep_this_interval)
+        elif end_time <= current_time: # Ensure loop terminates if precision issues occur
+             break
+
+    return True # Indicate sleep completed normally or was paused/resumed
+
 
 # Modify smith to accept interactor
 def smith(item, tier, interactor_instance):
+    """ Performs the smithing actions for a given item and tier.
+        Returns True if the entire process completes, False if interrupted by stop signal.
+    """
+    global script_running, script_paused # Ensure globals are accessible
 
     # Activate window just in case
     interactor_instance.activate() # Use passed interactor
@@ -198,63 +245,69 @@ def smith(item, tier, interactor_instance):
     x, y, w, h = rois["forge"]
     click_x, click_y = randomize_click_position(x, y, w, h, shape='rectangle', roi_diminish=2)
     interactor_instance.click(click_x, click_y) # Use passed interactor
-    time.sleep(random.uniform(1.2, 1.4))
+    if not interruptible_sleep(random.uniform(1.2, 1.4)): return False
 
     # Select Bar
     x, y, w, h = rois["primal_bar"]
     click_x, click_y = randomize_click_position(x, y, w, h, shape='rectangle', roi_diminish=2)
     interactor_instance.click(click_x, click_y) # Use passed interactor
-    time.sleep(random.uniform(1.2, 1.4))
+    if not interruptible_sleep(random.uniform(1.2, 1.4)): return False
 
     # Select Item
     x, y, w, h = rois[item]
     click_x, click_y = randomize_click_position(x, y, w, h, shape='rectangle', roi_diminish=2)
     interactor_instance.click(click_x, click_y) # Use passed interactor
-    time.sleep(random.uniform(1.2, 1.4))
+    if not interruptible_sleep(random.uniform(1.2, 1.4)): return False
 
     # Select Tier
     x, y, w, h = rois[tier]
     click_x, click_y = randomize_click_position(x, y, w, h, shape='rectangle', roi_diminish=2)
     interactor_instance.click(click_x, click_y) # Use passed interactor
-    time.sleep(random.uniform(1.2, 1.4))
+    if not interruptible_sleep(random.uniform(1.2, 1.4)): return False
 
-    # Start Smithing
+    # Start Smithing Keys (quick actions, minimal sleep ok)
     interactor_instance.send_key(start_smithing)
-    time.sleep(random.uniform(0.6, 0.65))
+    if not interruptible_sleep(random.uniform(0.1, 0.15)): return False # Very short delay is fine
     interactor_instance.send_key(start_smithing)
-    time.sleep(random.uniform(0.6, 0.65))
+    if not interruptible_sleep(random.uniform(0.1, 0.15)): return False
     interactor_instance.send_key(start_smithing)
-    time.sleep(random.uniform(6, 6.6))
+    # Wait for initial smithing action on forge
+    if not interruptible_sleep(random.uniform(6, 6.6)): return False
 
     # Select Anvil
     x, y, w, h = rois["anvil"]
     click_x, click_y = randomize_click_position(x, y, w, h, shape='rectangle', roi_diminish=2)
     interactor_instance.click(click_x, click_y) # Use passed interactor
-    time.sleep(16.2)  # Wait for smithing on anvil
+    if not interruptible_sleep(16.2): return False  # Wait for smithing on anvil
 
     # --- Superheat Loop ---
-    while script_running and not script_paused:  # Check flags
+    while script_running: # Check stop flag at the start of each loop iteration
+        # Handle pause state before doing anything in the loop
+        while script_paused:
+            if not script_running: return False # Allow stop during pause
+            time.sleep(0.1) # Short sleep while paused
+
         # Find Bar in bag
         bag_img = interactor_instance.capture(rois["bagpack"]) # Use passed interactor
         if bag_img is None:
             print("Error capturing bagpack ROI.")
-            time.sleep(1)
-            continue
+            if not interruptible_sleep(1): return False # Make error wait interruptible
+            continue # Try capturing again
 
         bar_data = find_image(bar_img, bag_img)  # Use the global bar_img template path
 
         # Check if the bar is detected
         if bar_data and bar_data[-1] == 'Detected':
             _, bbox, _, _, _ = bar_data
-            if bbox is None:  # Add check if bbox is None
+            if bbox is None:
                 print("Bar detected but bbox is None. Skipping superheat.")
-                break  # Exit superheat loop if bar location not found
+                break # Exit superheat loop
 
             # Click superheat spell hotkey
             interactor_instance.send_key(superheat_spell) # Use passed interactor
-            time.sleep(random.uniform(0.6, 0.65))
+            if not interruptible_sleep(random.uniform(0.6, 0.65)): return False
 
-            # Click on the bar (adjust coordinates relative to bagpack ROI)
+            # Click on the bar
             bar_x_rel, bar_y_rel, bar_w, bar_h = bbox
             bag_x, bag_y, _, _ = rois["bagpack"]
             bar_x_abs = bag_x + bar_x_rel
@@ -263,12 +316,15 @@ def smith(item, tier, interactor_instance):
             click_x, click_y = randomize_click_position(bar_x_abs, bar_y_abs, bar_w, bar_h, shape='rectangle', roi_diminish=2)
             interactor_instance.click(click_x, click_y) # Use passed interactor
             print(f"Superheating bar at ({click_x}, {click_y})")
-            time.sleep(random.uniform(16.2, 16.8))  # Wait for superheat cooldown/action
+            if not interruptible_sleep(random.uniform(16.2, 16.8)): return False  # Wait for superheat cooldown/action
         else:
-            print("No more bars found in bagpack or script stopped/paused. Ending superheat loop.")
-            break  # Exit superheat loop if no bars found or script stopped/paused
+            print("No more bars found in bagpack or bar not detected. Ending superheat loop.")
+            break  # Exit superheat loop if no bars found
     # --- End Superheat Loop ---
 
+    # If we reached here, the smith function completed its course without being stopped.
+    # Return True only if the script is still marked as running.
+    return script_running
 
 # --- New Input and Queue Logic ---
 def get_crafting_requests():
@@ -477,69 +533,214 @@ def get_crafting_requests():
     return total_tasks > 0
 # --- End New Input and Queue Logic ---
 
+# --- New Configuration Function ---
+def configure_script_settings():
+    global auto_buff_management, initial_torstol_wait, initial_attraction_wait
+
+    print("\n--- Script Configuration ---")
+
+    # 1. Ask about Auto Buff Management
+    while True:
+        choice = input("Enable automatic buff management (Torstol Sticks & Attraction Potion)? (yes/no) [yes]: ").lower().strip()
+        if choice in ['yes', 'y', '']:
+            auto_buff_management = True
+            print("Automatic buff management ENABLED.")
+            break
+        elif choice in ['no', 'n']:
+            auto_buff_management = False
+            print("Automatic buff management DISABLED.")
+            return True # Configuration successful (even if buffs disabled)
+        else:
+            print("Invalid input. Please enter 'yes' or 'no'.")
+
+    # 2. If enabled, ask about initial durations
+    if auto_buff_management:
+        print("\nBuff Duration Input (optional):")
+        print("If buffs are already active, enter their approximate remaining time in MINUTES.")
+        print("Leave blank or enter 0 if they are not active or you want immediate activation.")
+
+        # Torstol
+        while True:
+            try:
+                duration_str = input("  - Remaining Torstol Stick duration (minutes)? ").strip()
+                if not duration_str:
+                    initial_torstol_wait = 0
+                    break
+                duration_min = float(duration_str)
+                if duration_min >= 0:
+                    initial_torstol_wait = int(duration_min * 60) # Convert to seconds
+                    print(f"    -> Will wait {initial_torstol_wait} seconds before first Torstol activation.")
+                    break
+                else:
+                    print("Duration cannot be negative.")
+            except ValueError:
+                print("Invalid input. Please enter a number (e.g., 5.5 or 0).")
+
+        # Attraction Potion
+        while True:
+            try:
+                duration_str = input("  - Remaining Attraction Potion duration (minutes)? ").strip()
+                if not duration_str:
+                    initial_attraction_wait = 0
+                    break
+                duration_min = float(duration_str)
+                if duration_min >= 0:
+                    initial_attraction_wait = int(duration_min * 60) # Convert to seconds
+                    print(f"    -> Will wait {initial_attraction_wait} seconds before first Attraction activation.")
+                    break
+                else:
+                    print("Duration cannot be negative.")
+            except ValueError:
+                print("Invalid input. Please enter a number (e.g., 12 or 0).")
+
+    print("---------------------------\n")
+    return True # Configuration successful
+# --- End New Configuration Function ---
+
+
 # --- Background Task Functions ---
 def torstol_task(target_window_id):
-    global script_running, script_paused
+    global script_running, script_paused, auto_buff_management, initial_torstol_wait, last_torstol_activation_time
+    if not auto_buff_management:
+        print("Torstol task skipped (auto-management disabled).")
+        return
+
     interactor_instance = X11WindowInteractor(window_id=target_window_id)
     print(f"Torstol stick thread started (Interactor for window: {target_window_id}).")
-    # --- Initial Activation ---
-    if script_running and not script_paused:
-        print("Activating Initial Torstol Sticks...")
-        interactor_instance.send_key(torstol_sticks)
-        time.sleep(random.uniform(0.6, 0.8)) # Small delay after initial activation
-    # --- End Initial Activation ---
+
+    # Calculate initial remaining sleep time
+    remaining_sleep = initial_torstol_wait
+    if remaining_sleep <= 0:
+        # If no initial wait, activate immediately (if script is running and not paused)
+        if script_running and not script_paused:
+            print("Activating Initial Torstol Sticks...")
+            interactor_instance.send_key(torstol_sticks)
+            last_torstol_activation_time = time.time()
+            if not interruptible_sleep(random.uniform(0.6, 0.8)): return # Use interruptible sleep
+        else:
+             # If starting paused, set activation time as if it just happened
+             last_torstol_activation_time = time.time()
+        remaining_sleep = random.uniform(585, 600) # Set timer for next activation
+
+    print(f"Torstol: Initial wait/sleep: {remaining_sleep:.1f} seconds.")
+
     while script_running:
         try:
-            sleep_duration = random.uniform(585, 600)
             start_time = time.time()
-            while time.time() - start_time < sleep_duration:
-                 if not script_running:
-                     print("Torstol stick thread stopping.")
-                     return
-                 if script_paused:
-                     time.sleep(1)
-                     start_time = time.time()
-                     continue
-                 time.sleep(0.5)
+            pause_duration = 0
+            # --- Main Sleep Loop (already handles pauses correctly) ---
+            while time.time() - start_time < remaining_sleep:
+                if not script_running:
+                    print("Torstol stick thread stopping.")
+                    return
 
+                if script_paused:
+                    pause_start = time.time()
+                    print("Torstol task paused...")
+                    while script_paused:
+                        if not script_running:
+                             print("Torstol stick thread stopping during pause.")
+                             return
+                        time.sleep(0.2) # Keep short check sleep here
+                    pause_duration += time.time() - pause_start
+                    print(f"Torstol task resumed. Adjusted timer for pause duration ({pause_duration:.1f}s).")
+                    # Recalculate the effective start time after pause
+                    start_time = time.time() - (remaining_sleep - (time.time() - (start_time + pause_duration)))
+
+                time.sleep(0.2) # Keep short check sleep here
+            # --- End Main Sleep Loop ---
+
+            # Time is up, activate if still running and not paused
             if script_running and not script_paused:
                 print("Activating Torstol Sticks...")
                 interactor_instance.send_key(torstol_sticks)
+                last_torstol_activation_time = time.time()
+                # Calculate sleep for the *next* cycle
+                remaining_sleep = random.uniform(585, 600)
+                print(f"Torstol: Next activation in ~{remaining_sleep:.1f} seconds.")
+            elif script_running and script_paused:
+                 print("Torstol activation due, but script is paused. Will activate on resume.")
+                 remaining_sleep = 0.1 # Set a tiny delay
+
+            elif not script_running:
+                 print("Torstol stick thread stopping before activation.")
+                 return
+
         except Exception as e:
             print(f"Error in torstol_task: {e}")
-            time.sleep(5)
+            print("Waiting before retrying loop...")
+            if not interruptible_sleep(5): return # Use interruptible sleep in except block
+
     print("Torstol stick thread finished.")
 
+
 def attraction_task(target_window_id):
-    global script_running, script_paused
+    global script_running, script_paused, auto_buff_management, initial_attraction_wait, last_attraction_activation_time
+    if not auto_buff_management:
+        print("Attraction task skipped (auto-management disabled).")
+        return
+
     interactor_instance = X11WindowInteractor(window_id=target_window_id)
     print(f"Attraction potion thread started (Interactor for window: {target_window_id}).")
-    # --- Initial Activation ---
-    if script_running and not script_paused:
-        print("Activating Initial Attraction Potion...")
-        interactor_instance.send_key(attraction_potion)
-        time.sleep(random.uniform(0.6, 0.8)) # Small delay after initial activation
-    # --- End Initial Activation ---
+
+    # Calculate initial remaining sleep time
+    remaining_sleep = initial_attraction_wait
+    if remaining_sleep <= 0:
+        if script_running and not script_paused:
+            print("Activating Initial Attraction Potion...")
+            interactor_instance.send_key(attraction_potion)
+            last_attraction_activation_time = time.time()
+            if not interruptible_sleep(random.uniform(0.6, 0.8)): return # Use interruptible sleep
+        else:
+            last_attraction_activation_time = time.time()
+        remaining_sleep = random.uniform(880, 895)
+
+    print(f"Attraction: Initial wait/sleep: {remaining_sleep:.1f} seconds.")
+
     while script_running:
         try:
-            sleep_duration = random.uniform(880, 895)
             start_time = time.time()
-            while time.time() - start_time < sleep_duration:
+            pause_duration = 0
+            # --- Main Sleep Loop (already handles pauses correctly) ---
+            while time.time() - start_time < remaining_sleep:
                  if not script_running:
                      print("Attraction potion thread stopping.")
                      return
+
                  if script_paused:
-                     time.sleep(1)
-                     start_time = time.time()
-                     continue
-                 time.sleep(0.5)
+                     pause_start = time.time()
+                     print("Attraction task paused...")
+                     while script_paused:
+                         if not script_running:
+                              print("Attraction potion thread stopping during pause.")
+                              return
+                         time.sleep(0.2) # Keep short check sleep here
+                     pause_duration += time.time() - pause_start
+                     print(f"Attraction task resumed. Adjusted timer for pause duration ({pause_duration:.1f}s).")
+                     start_time = time.time() - (remaining_sleep - (time.time() - (start_time + pause_duration)))
+
+                 time.sleep(0.2) # Keep short check sleep here
+            # --- End Main Sleep Loop ---
 
             if script_running and not script_paused:
                 print("Activating Attraction Potion...")
                 interactor_instance.send_key(attraction_potion)
+                last_attraction_activation_time = time.time()
+                remaining_sleep = random.uniform(880, 895)
+                print(f"Attraction: Next activation in ~{remaining_sleep:.1f} seconds.")
+            elif script_running and script_paused:
+                 print("Attraction activation due, but script is paused. Will activate on resume.")
+                 remaining_sleep = 0.1
+
+            elif not script_running:
+                 print("Attraction potion thread stopping before activation.")
+                 return
+
         except Exception as e:
             print(f"Error in attraction_task: {e}")
-            time.sleep(5)
+            print("Waiting before retrying loop...")
+            if not interruptible_sleep(5): return # Use interruptible sleep in except block
+
     print("Attraction potion thread finished.")
 # --- End Background Task Functions ---
 
@@ -551,9 +752,9 @@ def main_script(target_window_id):
 
     print("Activating window and ensuring Superheat Form is active...")
     interactor_instance.activate()
-    time.sleep(0.5) # Small delay after activation
+    if not interruptible_sleep(0.5): return # Small delay after activation
 
-    # --- Robust Superheat Form Check/Activation ---
+    # --- Robust Superheat Form Check/Activation (using interruptible_sleep) ---
     max_retries = 3
     superheat_active = False
     for attempt in range(max_retries):
@@ -563,7 +764,7 @@ def main_script(target_window_id):
             buff_img = interactor_instance.capture(rois["buff"])
             if buff_img is None:
                 print("Error capturing buff ROI. Retrying...")
-                time.sleep(1.5)
+                if not interruptible_sleep(1.5): return # Use interruptible sleep
                 continue
 
             _, _, _, _, status = find_image(superheat_form_img, buff_img, lineant_matcher)
@@ -575,13 +776,13 @@ def main_script(target_window_id):
             else:
                 print("Superheat Form not detected. Attempting activation...")
                 interactor_instance.send_key(superheat_form)
-                time.sleep(random.uniform(2.0, 2.5)) # Wait for activation animation/buff to appear
+                if not interruptible_sleep(random.uniform(2.0, 2.5)): return # Use interruptible sleep
 
                 # Re-check after activation attempt
                 buff_img_after = interactor_instance.capture(rois["buff"])
                 if buff_img_after is None:
                      print("Error capturing buff ROI after activation attempt. Retrying check...")
-                     time.sleep(1.5)
+                     if not interruptible_sleep(1.5): return # Use interruptible sleep
                      continue
 
                 _, _, _, _, status_after = find_image(superheat_form_img, buff_img_after, lineant_matcher)
@@ -595,16 +796,14 @@ def main_script(target_window_id):
 
         except Exception as e:
             print(f"Error during Superheat Form check/activation: {e}. Retrying...")
-            time.sleep(2.0)
+            if not interruptible_sleep(2.0): return # Use interruptible sleep
 
         if not superheat_active and attempt < max_retries - 1:
             print("Waiting before next check...")
-            time.sleep(random.uniform(2.0, 3.0))
+            if not interruptible_sleep(random.uniform(2.0, 3.0)): return # Use interruptible sleep
 
     if not superheat_active:
         print("Failed to activate or verify Superheat Form after multiple attempts. Stopping script.")
-        # Optionally, signal the main thread or other threads if needed
-        # For now, just stopping this thread:
         script_running = False # Ensure other loops stop
         return # Stop main_script execution
     # --- End Superheat Form Check ---
@@ -612,73 +811,118 @@ def main_script(target_window_id):
 
     print("Processing queue...")
     while script_running:
+        # Handle pause state at the beginning of the loop
         while script_paused:
-            time.sleep(1)
-            if not script_running: break
-        if not script_running: break
+            if not script_running: break # Allow stop during pause
+            time.sleep(0.1) # Short sleep while paused
+        if not script_running: break # Exit loop if stopped
 
         if crafting_queue:
-            item, tier = crafting_queue.popleft()
+            # Peek at the next task without removing it yet
+            item, tier = crafting_queue[0]
             print(f"\nProcessing task: Craft {item} - {tier}")
             print(f"Tasks remaining: {len(crafting_queue)}")
             try:
-                smith(item, tier, interactor_instance)
-                print(f"Finished task: Craft {item} - {tier}")
-                time.sleep(random.uniform(1.5, 2.5))
+                # Execute the smithing task
+                task_completed_successfully = smith(item, tier, interactor_instance)
+
+                # Check script status *after* smith returns
+                if not script_running:
+                    print("Script stopped during or immediately after smithing task.")
+                    break # Exit main loop
+
+                # Only remove the task from queue if smith() completed fully
+                if task_completed_successfully:
+                    crafting_queue.popleft() # Task done, remove it
+                    print(f"Finished task: Craft {item} - {tier}")
+                    # Wait before the next task (interruptible)
+                    if not interruptible_sleep(random.uniform(1.5, 2.5)):
+                        break # Stop if sleep interrupted
+                else:
+                     # This case should ideally not be reached if script_running is checked correctly
+                     # after the smith call, but it's a safeguard.
+                     print(f"Smithing task ({item}, {tier}) reported incomplete, but script still running. Stopping.")
+                     script_running = False
+                     break
+
             except Exception as e:
                 print(f"Error during smithing task ({item}, {tier}): {e}")
+                # Check for specific known non-critical errors if needed, otherwise stop
                 if isinstance(e, AttributeError) and "'_thread._local' object has no attribute 'display'" in str(e):
                      print("Detected potential threading issue with display interaction. Stopping script.")
                 else:
-                     print("Stopping script due to unexpected error.")
+                     print("Stopping script due to unexpected error in main loop.")
                 script_running = False
-                break
+                break # Exit main loop on error
         else:
             print("Crafting queue is empty. Stopping script.")
-            script_running = False
-            break
+            script_running = False # Set flag to false
+            break # Exit main loop
 
     print("Main script loop finished.")
 
 
 def on_press(key):
-    global script_running, script_paused, interactor
+    global script_running, script_paused, interactor, auto_buff_management
     try:
         # Check for F11 and F12 keys
         if key == pkeyboard.Key.f11:  # F11 key to start/pause
             if not script_running:
-                if get_crafting_requests():
-                    target_window_id = None
-                    try:
-                        target_window_id = interactor.window_id
-                        if target_window_id is None:
-                             print("Error: Could not determine target window ID from global interactor.")
-                             print("Please ensure the target window is active or run with RECALIBRATE=True once.")
-                             return
+                # --- Configuration Step ---
+                if not configure_script_settings():
+                    print("Configuration aborted. Script not started.")
+                    return # Stop if configuration fails or user aborts
 
-                        print(f"Using Window ID: {target_window_id} for threads.")
+                # --- Crafting Queue Step ---
+                if not get_crafting_requests():
+                    print("No crafting tasks added. Script not started.")
+                    return # Stop if queue is empty
 
-                    except Exception as e:
-                        print(f"Error getting window ID from global interactor: {e}")
-                        return
+                # --- Start Script ---
+                target_window_id = None
+                try:
+                    target_window_id = interactor.window_id
+                    if target_window_id is None:
+                         print("Error: Could not determine target window ID from global interactor.")
+                         print("Please ensure the target window is active or run with RECALIBRATE=True once.")
+                         return
 
-                    script_running = True
-                    script_paused = False
-                    print("Script starting...")
-                    threading.Thread(target=main_script, args=(target_window_id,), daemon=True).start()
+                    print(f"Using Window ID: {target_window_id} for threads.")
+
+                except Exception as e:
+                    print(f"Error getting window ID from global interactor: {e}")
+                    return
+
+                script_running = True
+                script_paused = False
+                print("Script starting...")
+                # Start main crafting thread
+                threading.Thread(target=main_script, args=(target_window_id,), daemon=True).start()
+
+                # Start buff threads only if enabled
+                if auto_buff_management:
                     threading.Thread(target=torstol_task, args=(target_window_id,), daemon=True).start()
                     threading.Thread(target=attraction_task, args=(target_window_id,), daemon=True).start()
-
                 else:
-                    print("No crafting tasks added. Script not started.")
+                    print("Skipping buff management threads as they are disabled.")
+
             else:
+                # --- Pause/Resume Logic ---
                 script_paused = not script_paused
-                print(f"Script {'paused' if script_paused else 'resumed'}.")
+                if script_paused:
+                    print("--- Script Paused ---")
+                    # Optionally clear output or show paused state
+                else:
+                    print("--- Script Resumed ---")
+                    # Background threads will handle resuming timers automatically
+
         elif key == pkeyboard.Key.f12:  # F12 key to stop
             if script_running:
-                print("Stopping script immediately...")
+                print("--- Stopping script immediately (F12 pressed) ---")
                 script_running = False
                 script_paused = False
+                # Threads are daemons, they will exit when the main script finishes
+                # or check the script_running flag internally.
     except AttributeError:
         # Usually happens with special keys that don't have a 'char' attribute, safe to ignore here.
         pass
