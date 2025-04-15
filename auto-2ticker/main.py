@@ -213,7 +213,7 @@ def capture_ocr_region(region_name, interactor_instance):
         else:
             # Save the image for reference
             img_path = os.path.join(assets_dir, f"{region_name}.png")
-            cv2.imwrite(img_path, cv2.cvtColor(img, cv2.COLOR_RGBA2BGR))
+            cv2.imwrite(img_path, cv2.cvtColor(img, cv2.COLOR_RGBA2RGB))
             print(f"Region preview saved to {img_path}")
 
             # Ask if user wants to test OCR (make it optional)
