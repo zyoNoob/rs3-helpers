@@ -6,9 +6,7 @@ import time
 import threading
 import random
 import pynput.keyboard as pkeyboard
-from collections import deque
 import cv2
-import numpy as np
 
 import sys
 sys.path.append("../x11-window-interactor")
@@ -102,8 +100,10 @@ def capture_buff_image(buff_name, interactor_instance):
 
     # Save the image
     img_path = os.path.join(assets_dir, f"{buff_name}.png")
-    cv2.imwrite(img_path, cv2.cvtColor(img, cv2.COLOR_RGBA2BGR))
-    print(f"Buff image saved to {img_path}")
+    # Convert from RGBA to RGB (not BGR) for template matching
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_RGBA2RGB)
+    cv2.imwrite(img_path, img_rgb)
+    print(f"Buff image saved to {img_path} (RGB format)")
 
     return img_path
 
@@ -146,7 +146,8 @@ def verify_buff_active(template_path, interactor_instance, roi=None, buff_bar_ro
             roi = buff_bar_roi
         else:
             # Calculate a default region based on template dimensions
-            template_img = cv2.imread(template_path)
+            # Load template image in RGB mode to match how it was saved
+            template_img = cv2.imread(template_path, cv2.IMREAD_COLOR)
             if template_img is None:
                 print(f"Error: Could not load template image from {template_path}")
                 return False, None
@@ -238,6 +239,25 @@ def save_config(config_data):
     except Exception as e:
         print(f"Error saving config: {e}")
 
+def safe_input(prompt):
+    """A wrapper around input() that cleans any escape sequences from the input."""
+    user_input = input(prompt)
+    # Remove common escape sequences that might appear from function keys
+    cleaned_input = ''
+    i = 0
+    while i < len(user_input):
+        if user_input[i] == '\x1b' or user_input[i] == '^':
+            # Skip escape sequence
+            j = i
+            while j < len(user_input) and (j == i or user_input[j] != '~'):
+                j += 1
+            if j < len(user_input) and user_input[j] == '~':
+                i = j + 1  # Skip past the escape sequence
+                continue
+        cleaned_input += user_input[i]
+        i += 1
+    return cleaned_input
+
 def get_buff_configuration(window_id=None):
     """Get buff configuration from user input."""
     global buffs
@@ -273,7 +293,7 @@ def get_buff_configuration(window_id=None):
             print(f"Buff bar region: {previous_config['buff_bar_roi']}")
 
         while True:
-            choice = input("\nUse previous configuration? (yes/no) [yes]: ").lower().strip()
+            choice = safe_input("\nUse previous configuration? (yes/no) [yes]: ").lower().strip()
             if choice in ['yes', 'y', '']:
                 buffs = previous_config['buffs']
                 buff_bar_roi = previous_config.get('buff_bar_roi')
@@ -294,7 +314,7 @@ def get_buff_configuration(window_id=None):
             print("\n--- New Buff ---")
 
             # Get key to press
-            key = input("Enter the key to press for this buff: ").strip()
+            key = safe_input("Enter the key to press for this buff: ").strip()
             if not key:
                 print("Key cannot be empty. Please try again.")
                 continue
@@ -308,7 +328,7 @@ def get_buff_configuration(window_id=None):
             buff_type = 0
             while buff_type not in [1, 2, 3]:
                 try:
-                    buff_type = int(input("Select buff type (1-3): ").strip())
+                    buff_type = int(safe_input("Select buff type (1-3): ").strip())
                     if buff_type not in [1, 2, 3]:
                         print("Invalid selection. Please enter 1, 2, or 3.")
                 except ValueError:
@@ -319,7 +339,7 @@ def get_buff_configuration(window_id=None):
             if buff_type in [1, 2]:  # Only ask for duration for types 1 and 2
                 while True:
                     try:
-                        duration = float(input("Enter the buff duration in seconds (how long the buff lasts): ").strip())
+                        duration = float(safe_input("Enter the buff duration in seconds (how long the buff lasts): ").strip())
                         if duration <= 0:
                             print("Duration must be greater than 0. Please try again.")
                             continue
@@ -330,7 +350,7 @@ def get_buff_configuration(window_id=None):
             # Get current active period (if buff is already active)
             while True:
                 try:
-                    active_time = input("If buff is already active, enter remaining time in seconds (or leave empty): ").strip()
+                    active_time = safe_input("If buff is already active, enter remaining time in seconds (or leave empty): ").strip()
                     if not active_time:
                         active_time = 0
                     else:
@@ -381,7 +401,7 @@ def get_buff_configuration(window_id=None):
 
             # Ask if user wants to add another buff
             while True:
-                add_another = input("Add another buff? (yes/no) [yes]: ").lower().strip()
+                add_another = safe_input("Add another buff? (yes/no) [yes]: ").lower().strip()
                 if add_another in ['yes', 'y', '']:
                     break
                 elif add_another in ['no', 'n']:
@@ -461,8 +481,10 @@ def buff_task(buff_config, target_window_id, buff_bar_roi=None):
         # Activate the buff
         attempt = 0
         while script_running and not script_paused:
+            interactor_instance.activate()
+            if not interruptible_sleep(0.1): return False, roi
             interactor_instance.send_key(key)
-            if not interruptible_sleep(random.uniform(0.6, 0.8)): return False, roi
+            if not interruptible_sleep(1.5): return False, roi
 
             # Verify activation if using template
             if use_template:
@@ -522,6 +544,7 @@ def buff_task(buff_config, target_window_id, buff_bar_roi=None):
                 # Check if it's time to activate
                 if current_time >= target_expiry_time:
                     if script_running:
+                        interactor_instance.activate()
                         interactor_instance.send_key(key)
                         if not interruptible_sleep(random.uniform(0.6, 0.8)): return
 
@@ -584,6 +607,9 @@ def on_press(key):
     try:
         # Check for F11 and F12 keys
         if key == pkeyboard.Key.f11:  # F11 key to start/pause
+            # Clear the terminal line to prevent escape sequences from showing
+            print("\r", end="", flush=True)
+
             if not script_running:
                 # Get the window ID first
                 target_window_id = interactor.window_id
@@ -614,6 +640,9 @@ def on_press(key):
                     print("--- Script Resumed ---")
 
         elif key == pkeyboard.Key.f12:  # F12 key to stop
+            # Clear the terminal line to prevent escape sequences from showing
+            print("\r", end="", flush=True)
+
             if script_running:
                 print("--- Stopping script immediately (F12 pressed) ---")
                 script_running = False
