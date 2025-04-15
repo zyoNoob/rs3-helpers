@@ -1,3 +1,28 @@
 {
-    "regions": []
+    "regions": [
+        {
+            "name": "test",
+            "area": [
+                1275,
+                0,
+                307,
+                182
+            ],
+            "text_patterns": [
+                "xp"
+            ],
+            "action": {
+                "type": "click_region",
+                "region": [
+                    1863,
+                    658,
+                    167,
+                    169
+                ]
+            },
+            "scan_frequency": 0.1,
+            "cooldown": 0.6,
+            "confidence_threshold": 0.6
+        }
+    ]
 }

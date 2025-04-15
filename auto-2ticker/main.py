@@ -187,15 +187,17 @@ def perform_action(action_config, interactor_instance):
         x, y, w, h = region
         click_x, click_y = randomize_click_position(x, y, w, h, shape='circle', roi_diminish=2)
         print(f"Clicking at random position ({click_x}, {click_y}) within region")
-        return interactor_instance.click(click_x, click_y)
+        interactor_instance.click(click_x, click_y)
+        return True
 
     elif action_type == 'key':
         # Press a key
         key = action_config.get('key', None)
         if key is not None:
-            return interactor_instance.send_key(key)
+            interactor_instance.send_key(key)
+            return True
 
-    return True
+    return False
 
 # Configuration functions
 def load_config():
@@ -498,7 +500,7 @@ def ocr_task(region_config, target_window_id):
     text_patterns = region_config.get('text_patterns', [])
     action_config = region_config.get('action', {'type': 'click'})
     scan_frequency = region_config.get('scan_frequency', 0.1)
-    cooldown = region_config.get('cooldown', 0.5)
+    cooldown = region_config.get('cooldown', 0.6)
     confidence_threshold = region_config.get('confidence_threshold', 0.6)
 
     # Initialize variables
