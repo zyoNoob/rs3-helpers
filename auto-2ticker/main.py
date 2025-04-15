@@ -4,8 +4,8 @@ import json
 import os
 import time
 import threading
+import math
 import random
-import numpy as np
 import cv2
 import easyocr
 import pynput.keyboard as pkeyboard
@@ -50,6 +50,54 @@ def safe_input(prompt):
         cleaned_input += user_input[i]
         i += 1
     return cleaned_input
+
+def randomize_click_position(x, y, width, height, shape='rectangle', roi_diminish=2):
+    """Generate a random click position within a region.
+
+    Args:
+        x: X coordinate of the region's top-left corner
+        y: Y coordinate of the region's top-left corner
+        width: Width of the region
+        height: Height of the region
+        shape: 'rectangle' or 'circle' for the randomization shape
+        roi_diminish: Factor to reduce the click area (higher = smaller area)
+
+    Returns:
+        Tuple of (click_x, click_y) coordinates
+    """
+
+    # Get the center coordinates of the ROI
+    center_x = x + width // 2
+    center_y = y + height // 2
+
+    if shape == 'circle':
+        # Randomize within a circle
+        radius = (min(width, height) // 2) // roi_diminish
+        angle = random.uniform(0, 2 * math.pi)
+        r = radius * math.sqrt(random.uniform(0, 1))
+        click_x = int(center_x + r * math.cos(angle))
+        click_y = int(center_y + r * math.sin(angle))
+    else:
+        # Randomize within a rectangle
+        area_width = width * 0.5
+        area_height = height * 0.5
+
+        left_bound = center_x - area_width / roi_diminish
+        right_bound = center_x + area_width / roi_diminish
+        top_bound = center_y - area_height / roi_diminish
+        bottom_bound = center_y + area_height / roi_diminish
+
+        # Use normal distribution centered around the middle, clamped to bounds
+        # Adjust standard deviation based on area size for better spread
+        std_dev_x = max(1, area_width / 6)
+        std_dev_y = max(1, area_height / 6)
+        click_x = int(random.normalvariate(center_x, std_dev_x))
+        click_y = int(random.normalvariate(center_y, std_dev_y))
+
+        click_x = int(min(max(click_x, left_bound), right_bound))
+        click_y = int(min(max(click_y, top_bound), bottom_bound))
+
+    return int(click_x), int(click_y)
 
 def interruptible_sleep(seconds):
     """Sleep that can be interrupted by script_running being set to False."""
@@ -125,31 +173,27 @@ def perform_ocr(image, text_patterns, confidence_threshold=0.6):
 
 def perform_action(action_config, interactor_instance):
     """Perform an action based on configuration."""
-    action_type = action_config.get('type', 'click')
+    action_type = action_config.get('type', 'click_region')
 
-    if action_type == 'click':
-        # Get click position
-        click_position = action_config.get('position', None)
-        if click_position is None:
-            # Use current mouse position
-            return interactor_instance.click()
-        else:
-            # Move to specified position and click
-            x, y = click_position
-            return interactor_instance.click_at(x, y)
+    interactor_instance.activate()
+
+    if action_type == 'click_region':
+        # Click at a random position within a region
+        region = action_config.get('region', None)
+        if region is None:
+            print("Error: No region defined for click_region action")
+            return False
+
+        x, y, w, h = region
+        click_x, click_y = randomize_click_position(x, y, w, h, shape='circle', roi_diminish=2)
+        print(f"Clicking at random position ({click_x}, {click_y}) within region")
+        return interactor_instance.click(click_x, click_y)
 
     elif action_type == 'key':
         # Press a key
         key = action_config.get('key', None)
         if key is not None:
             return interactor_instance.send_key(key)
-
-    elif action_type == 'sequence':
-        # Perform a sequence of actions
-        actions = action_config.get('actions', [])
-        for action in actions:
-            perform_action(action, interactor_instance)
-            time.sleep(action_config.get('delay', 0.1))
 
     return True
 
@@ -211,88 +255,65 @@ def capture_ocr_region(region_name, interactor_instance):
     print("Please select the area containing the text to monitor.")
 
     # Let the user select the ROI
-    try:
-        roi = interactor_instance.select_roi_interactive()
-        if not roi:
-            print("ROI selection cancelled or failed.")
-            return None
-    except Exception as e:
-        print(f"Error during ROI selection: {e}")
-        print("This may be due to display connection issues.")
+    roi = interactor_instance.select_roi_interactive()
+    if not roi:
+        print("ROI selection cancelled or failed.")
         return None
 
     print(f"OCR region selected: {roi}")
 
     # Capture a screenshot of the region for preview
-    try:
-        x, y, w, h = roi
-        img = interactor_instance.capture((x, y, w, h))
-        if img is None:
-            print("Failed to capture image, but continuing with configuration.")
-        else:
-            # Save the image for reference
-            img_path = os.path.join(assets_dir, f"{region_name}.png")
-            cv2.imwrite(img_path, cv2.cvtColor(img, cv2.COLOR_RGBA2RGB))
-            print(f"Region preview saved to {img_path}")
+    x, y, w, h = roi
+    img = interactor_instance.capture((x, y, w, h))
+    if img is None:
+        print("Failed to capture image, but continuing with configuration.")
+        return roi
 
-            # Ask if user wants to test OCR (make it optional)
-            test_ocr = safe_input("\nTest OCR on this region? This may take a moment. (yes/no) [no]: ").lower().strip()
-            if test_ocr in ['yes', 'y']:
-                try:
-                    print("Initializing OCR engine (this may take a few seconds)...")
-                    reader = initialize_ocr()
-                    print("Running OCR test...")
-                    results = reader.readtext(img)
-                    print("\nOCR Test Results:")
-                    if results:
-                        for result in results:
-                            # Handle different result formats
-                            if len(result) >= 3:
-                                # Extract text and confidence (ignore bbox)
-                                _, text, confidence = result[:3]
-                                print(f"  Text: '{text}', Confidence: {confidence:.2f}")
-                    else:
-                        print("  No text detected in this region.")
-                except Exception as e:
-                    print(f"OCR test error: {e}")
-                    print("Continuing with configuration despite OCR test failure.")
-    except Exception as e:
-        print(f"Error during region capture: {e}")
-        print("Continuing with configuration using the selected region.")
+    # Save the image for reference
+    img_path = os.path.join(assets_dir, f"{region_name}.png")
+    cv2.imwrite(img_path, cv2.cvtColor(img, cv2.COLOR_RGBA2RGB))
+    print(f"Region preview saved to {img_path}")
+
+    # Ask if user wants to test OCR (make it optional)
+    test_ocr = safe_input("\nTest OCR on this region? This may take a moment. (yes/no) [no]: ").lower().strip()
+    if test_ocr in ['yes', 'y']:
+        try:
+            print("Initializing OCR engine (this may take a few seconds)...")
+            reader = initialize_ocr()
+            print("Running OCR test...")
+            results = reader.readtext(img)
+            print("\nOCR Test Results:")
+            if results:
+                for result in results:
+                    # Handle different result formats
+                    if len(result) >= 3:
+                        # Extract text and confidence (ignore bbox)
+                        _, text, confidence = result[:3]
+                        print(f"  Text: '{text}', Confidence: {confidence:.2f}")
+            else:
+                print("  No text detected in this region.")
+        except Exception as e:
+            print(f"OCR test error: {e}")
+            print("Continuing with configuration despite OCR test failure.")
 
     return roi
 
-def capture_click_position(position_name, interactor_instance):
-    """Capture a position on the screen for clicking."""
-    print(f"\nCapturing click position '{position_name}'")
-    print("Please click on the position where you want to click when text is detected.")
-    print("Press Esc to cancel.")
 
-    # Let the user select a position
-    try:
-        position = interactor_instance.get_mouse_position_interactive()
-        if position is None:
-            print("Position selection cancelled.")
-            return None
 
-        x, y = position
-        print(f"Click position selected: ({x}, {y})")
-        return position
-    except Exception as e:
-        print(f"Error during position selection: {e}")
-        print("Using current mouse position as fallback.")
-        try:
-            # Try to get current mouse position as fallback
-            current_pos = interactor_instance.get_mouse_position()
-            if current_pos:
-                x, y = current_pos
-                print(f"Using current mouse position as fallback: ({x}, {y})")
-                return current_pos
-        except Exception as fallback_error:
-            print(f"Failed to get current mouse position: {fallback_error}")
+def capture_click_region(region_name, interactor_instance):
+    """Capture a region on the screen for clicking."""
+    print(f"\nCapturing click region '{region_name}'")
+    print("Please select the area where you want to click when text is detected.")
+    print("The script will click at a random position within this region.")
 
-        print("No click position could be determined. Actions will use current mouse position at runtime.")
+    # Let the user select the ROI
+    roi = interactor_instance.select_roi_interactive()
+    if not roi:
+        print("Region selection cancelled or failed.")
         return None
+
+    print(f"Click region selected: {roi}")
+    return roi
 
 def get_ocr_configuration(window_id=None):
     """Get OCR configuration from user input."""
@@ -365,38 +386,30 @@ def get_ocr_configuration(window_id=None):
 
             # Get action configuration
             print("\nAction Configuration:")
-            print("1. Click at current mouse position")
-            print("2. Click at specific position")
-            print("3. Press a key")
+            print("1. Click at random position within a region")
+            print("2. Press a key")
 
             action_type = 0
-            while action_type not in [1, 2, 3]:
+            while action_type not in [1, 2]:
                 try:
-                    action_type = int(safe_input("Select action type (1-3): ").strip())
-                    if action_type not in [1, 2, 3]:
-                        print("Invalid selection. Please enter 1, 2, or 3.")
+                    action_type = int(safe_input("Select action type (1-2): ").strip())
+                    if action_type not in [1, 2]:
+                        print("Invalid selection. Please enter 1 or 2.")
                 except ValueError:
                     print("Invalid input. Please enter a number.")
 
             action_config = {}
             if action_type == 1:
-                action_config = {
-                    'type': 'click',
-                    'position': None  # Use current mouse position
-                }
-            elif action_type == 2:
-                position = capture_click_position(f"{region_name}_click", config_interactor)
-                if position:
+                region = capture_click_region(f"{region_name}_region", config_interactor)
+                if region:
                     action_config = {
-                        'type': 'click',
-                        'position': position
+                        'type': 'click_region',
+                        'region': region
                     }
                 else:
-                    action_config = {
-                        'type': 'click',
-                        'position': None  # Fallback to current position
-                    }
-            elif action_type == 3:
+                    print("Region selection failed. Please try again.")
+                    continue
+            elif action_type == 2:
                 key = safe_input("Enter the key to press: ").strip()
                 action_config = {
                     'type': 'key',
@@ -474,130 +487,96 @@ def ocr_task(region_config, target_window_id):
     """Monitor a region for text and perform actions when detected."""
     global script_running, script_paused
 
-    try:
-        # Create a new interactor instance for this thread
+    # Create a new interactor instance for this thread
+    print(f"Initializing interactor for window ID: {target_window_id}")
+    interactor_instance = X11WindowInteractor(window_id=target_window_id)
+    print(f"Interactor initialized successfully for window ID: {target_window_id}")
+
+    # Extract region configuration
+    region_name = region_config.get('name', 'unnamed')
+    region_area = region_config.get('area')
+    text_patterns = region_config.get('text_patterns', [])
+    action_config = region_config.get('action', {'type': 'click'})
+    scan_frequency = region_config.get('scan_frequency', 0.1)
+    cooldown = region_config.get('cooldown', 0.5)
+    confidence_threshold = region_config.get('confidence_threshold', 0.6)
+
+    # Initialize variables
+    last_action_time = 0
+    action_cooldown = False
+    error_count = 0
+    max_consecutive_errors = 5
+
+    print(f"OCR task started for region '{region_name}' (Interactor for window: {target_window_id}).")
+    print(f"Monitoring for text patterns: {text_patterns}")
+    print(f"Action type: {action_config['type']}")
+    print(f"Scan frequency: {scan_frequency} seconds")
+    print(f"Cooldown: {cooldown} seconds")
+    print(f"Confidence threshold: {confidence_threshold}")
+
+    # Main OCR loop
+    while script_running:
         try:
-            print(f"Initializing interactor for window ID: {target_window_id}")
-            interactor_instance = X11WindowInteractor(window_id=target_window_id)
-            print(f"Interactor initialized successfully for window ID: {target_window_id}")
-        except Exception as interactor_error:
-            print(f"Error initializing interactor: {interactor_error}")
-            print("This thread will terminate. Please restart the script.")
-            return
+            # Handle pause state
+            while script_paused:
+                if not script_running:
+                    return  # Allow stop during pause
+                time.sleep(0.1)  # Short sleep while paused
 
-        # Extract region configuration
-        region_name = region_config.get('name', 'unnamed')
-        region_area = region_config.get('area')
-        text_patterns = region_config.get('text_patterns', [])
-        action_config = region_config.get('action', {'type': 'click'})
-        scan_frequency = region_config.get('scan_frequency', 0.1)
-        cooldown = region_config.get('cooldown', 0.5)
-        confidence_threshold = region_config.get('confidence_threshold', 0.6)
+            # Check if we're in cooldown
+            current_time = time.time()
+            if action_cooldown and current_time - last_action_time >= cooldown:
+                action_cooldown = False
+                print(f"Region '{region_name}': Cooldown ended")
 
-        # Initialize variables
-        last_action_time = 0
-        action_cooldown = False
-        error_count = 0
-        max_consecutive_errors = 5
+            # Capture and process the region
+            if not action_cooldown:
+                # Capture the region
+                image = capture_region(interactor_instance, region_area)
+                if image is None:
+                    print(f"Failed to capture region '{region_name}'. Retrying...")
+                    error_count += 1
+                    if error_count >= max_consecutive_errors:
+                        print(f"Too many consecutive errors for region '{region_name}'. Taking a longer break...")
+                        if not interruptible_sleep(5): return
+                        error_count = 0
+                    if not interruptible_sleep(1): return
+                    continue
 
-        print(f"OCR task started for region '{region_name}' (Interactor for window: {target_window_id}).")
-        print(f"Monitoring for text patterns: {text_patterns}")
-        print(f"Action type: {action_config['type']}")
-        print(f"Scan frequency: {scan_frequency} seconds")
-        print(f"Cooldown: {cooldown} seconds")
-        print(f"Confidence threshold: {confidence_threshold}")
+                # Reset error count on successful capture
+                error_count = 0
 
-        # Main OCR loop
-        while script_running:
-            try:
-                # Handle pause state
-                while script_paused:
-                    if not script_running: return  # Allow stop during pause
-                    time.sleep(0.1)  # Short sleep while paused
+                # Perform OCR
+                text_found, matches = perform_ocr(image, text_patterns, confidence_threshold)
 
-                # Check if we're in cooldown
-                current_time = time.time()
-                if action_cooldown and current_time - last_action_time >= cooldown:
-                    action_cooldown = False
-                    print(f"Region '{region_name}': Cooldown ended")
+                # If text is found, perform the action
+                if text_found:
+                    print(f"Region '{region_name}': Text detected - {matches}")
 
-                # Capture and process the region
-                if not action_cooldown:
-                    # Capture the region
-                    try:
-                        image = capture_region(interactor_instance, region_area)
-                        if image is None:
-                            print(f"Failed to capture region '{region_name}'. Retrying...")
-                            error_count += 1
-                            if error_count >= max_consecutive_errors:
-                                print(f"Too many consecutive errors for region '{region_name}'. Taking a longer break...")
-                                if not interruptible_sleep(5): return
-                                error_count = 0
-                            if not interruptible_sleep(1): return
-                            continue
-                    except Exception as capture_error:
-                        print(f"Error capturing region '{region_name}': {capture_error}")
-                        print("Trying to reinitialize interactor...")
-                        try:
-                            interactor_instance = X11WindowInteractor(window_id=target_window_id)
-                            print("Interactor reinitialized successfully")
-                        except Exception as reinit_error:
-                            print(f"Failed to reinitialize interactor: {reinit_error}")
-                        error_count += 1
-                        if error_count >= max_consecutive_errors:
-                            print(f"Too many consecutive errors for region '{region_name}'. Taking a longer break...")
-                            if not interruptible_sleep(5): return
-                            error_count = 0
-                        if not interruptible_sleep(1): return
-                        continue
+                    # Perform the action
+                    interactor_instance.activate()  # Ensure window is active
+                    if perform_action(action_config, interactor_instance):
+                        print(f"Region '{region_name}': Action performed")
+                        last_action_time = time.time()
+                        action_cooldown = True
+                    else:
+                        print(f"Region '{region_name}': Action failed")
 
-                    # Reset error count on successful capture
-                    error_count = 0
+            # Sleep until next scan
+            if not interruptible_sleep(scan_frequency): return
 
-                    # Perform OCR
-                    text_found, matches = perform_ocr(image, text_patterns, confidence_threshold)
+        except Exception as loop_error:
+            print(f"Error in OCR task loop for region '{region_name}': {loop_error}")
+            error_count += 1
+            if error_count >= max_consecutive_errors:
+                print(f"Too many consecutive errors for region '{region_name}'. Taking a longer break...")
+                if not interruptible_sleep(5): return
+                error_count = 0
+            else:
+                print("Waiting before retrying loop...")
+                if not interruptible_sleep(1): return  # Use interruptible sleep in except block
 
-                    # If text is found, perform the action
-                    if text_found:
-                        print(f"Region '{region_name}': Text detected - {matches}")
-
-                        # Perform the action
-                        try:
-                            interactor_instance.activate()  # Ensure window is active
-                            if perform_action(action_config, interactor_instance):
-                                print(f"Region '{region_name}': Action performed")
-                                last_action_time = time.time()
-                                action_cooldown = True
-                            else:
-                                print(f"Region '{region_name}': Action failed")
-                        except Exception as action_error:
-                            print(f"Error performing action for region '{region_name}': {action_error}")
-                            print("Trying to reinitialize interactor...")
-                            try:
-                                interactor_instance = X11WindowInteractor(window_id=target_window_id)
-                                print("Interactor reinitialized successfully")
-                            except Exception as reinit_error:
-                                print(f"Failed to reinitialize interactor: {reinit_error}")
-
-                # Sleep until next scan
-                if not interruptible_sleep(scan_frequency): return
-
-            except Exception as loop_error:
-                print(f"Error in OCR task loop for region '{region_name}': {loop_error}")
-                error_count += 1
-                if error_count >= max_consecutive_errors:
-                    print(f"Too many consecutive errors for region '{region_name}'. Taking a longer break...")
-                    if not interruptible_sleep(5): return
-                    error_count = 0
-                else:
-                    print("Waiting before retrying loop...")
-                    if not interruptible_sleep(1): return  # Use interruptible sleep in except block
-
-        print(f"OCR task for region '{region_name}' finished.")
-
-    except Exception as task_error:
-        print(f"Fatal error in OCR task: {task_error}")
-        print("OCR task terminated.")
+    print(f"OCR task for region '{region_name}' finished.")
 
 # Keyboard event handler
 def on_press(key):
@@ -609,40 +588,35 @@ def on_press(key):
             print("\r", end="", flush=True)
 
             if not script_running:
-                try:
-                    # Get the window ID first
-                    target_window_id = interactor.window_id
+                # Get the window ID first
+                target_window_id = interactor.window_id
 
-                    # --- Configuration Step ---
-                    if not get_ocr_configuration(window_id=target_window_id):
-                        print("Configuration aborted. Script not started.")
-                        return  # Stop if configuration fails or user aborts
+                # --- Configuration Step ---
+                if not get_ocr_configuration(window_id=target_window_id):
+                    print("Configuration aborted. Script not started.")
+                    return  # Stop if configuration fails or user aborts
 
-                    # Check if we have any regions configured
-                    if not ocr_regions:
-                        print("No OCR regions configured. Script not started.")
-                        return
+                # Check if we have any regions configured
+                if not ocr_regions:
+                    print("No OCR regions configured. Script not started.")
+                    return
 
-                    script_running = True
-                    script_paused = False
-                    print("Script starting...")
+                script_running = True
+                script_paused = False
+                print("Script starting...")
 
-                    # Initialize OCR engine
-                    ocr_engine = initialize_ocr()
-                    if ocr_engine is None:
-                        print("Warning: OCR engine initialization failed. Some functionality may not work.")
-                        print("Continuing anyway...")
+                # Initialize OCR engine
+                ocr_engine = initialize_ocr()
+                if ocr_engine is None:
+                    print("Warning: OCR engine initialization failed. Some functionality may not work.")
+                    print("Continuing anyway...")
 
-                    # Start OCR threads
-                    print(f"Starting {len(ocr_regions)} OCR monitoring threads...")
-                    for region_config in ocr_regions:
-                        thread = threading.Thread(target=ocr_task, args=(region_config, target_window_id), daemon=True)
-                        thread.start()
-                        print(f"Started thread for region '{region_config.get('name', 'unnamed')}'")
-                except Exception as e:
-                    print(f"Error starting script: {e}")
-                    script_running = False
-                    script_paused = False
+                # Start OCR threads
+                print(f"Starting {len(ocr_regions)} OCR monitoring threads...")
+                for region_config in ocr_regions:
+                    thread = threading.Thread(target=ocr_task, args=(region_config, target_window_id), daemon=True)
+                    thread.start()
+                    print(f"Started thread for region '{region_config.get('name', 'unnamed')}'")
 
             else:
                 # --- Pause/Resume Logic ---
