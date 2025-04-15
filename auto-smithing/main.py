@@ -611,7 +611,7 @@ def torstol_task(target_window_id):
     print(f"Torstol stick thread started (Interactor for window: {target_window_id}).")
 
     target_expiry_time = 0
-    next_interval = random.uniform(585, 600) # Default interval
+    next_interval = random.uniform(585, 595) # Default interval
 
     # Calculate initial target expiry time
     if initial_torstol_wait > 0:
@@ -667,7 +667,7 @@ def torstol_task(target_window_id):
                 if not interruptible_sleep(random.uniform(0.6, 0.8)): return
 
                 # Calculate NEXT target expiry time
-                next_interval = random.uniform(585, 600)
+                next_interval = random.uniform(585, 595)
                 target_expiry_time = last_torstol_activation_time + next_interval
                 print(f"Torstol: Next activation scheduled around {time.strftime('%H:%M:%S', time.localtime(target_expiry_time))}")
             else:
