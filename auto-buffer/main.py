@@ -134,56 +134,52 @@ def capture_buff_bar_region(interactor_instance):
     print(f"Buff bar region selected: {roi}")
     return roi
 
-def verify_buff_active(template_path, interactor_instance, roi=None, buff_bar_roi=None):
+def verify_buff_active(template_path, interactor_instance, buff_bar_roi=None):
     """Verify if a buff is active by checking if its icon is visible."""
     if not template_path or not os.path.exists(template_path):
-        return False, None
+        return False
 
-    # If ROI is not provided, use the buff bar region or calculate a default
-    if roi is None:
-        if buff_bar_roi is not None:
-            # Use the user-defined buff bar region
-            roi = buff_bar_roi
-        else:
-            # Calculate a default region based on template dimensions
-            # Load template image in RGB mode to match how it was saved
-            template_img = cv2.imread(template_path, cv2.IMREAD_COLOR)
-            if template_img is None:
-                print(f"Error: Could not load template image from {template_path}")
-                return False, None
+    # Use the buff bar region or calculate a default
+    if buff_bar_roi is not None:
+        # Use the user-defined buff bar region
+        roi = buff_bar_roi
+    else:
+        # Calculate a default region based on template dimensions
+        # Load template image in RGB mode to match how it was saved
+        template_img = cv2.imread(template_path, cv2.IMREAD_COLOR)
+        if template_img is None:
+            print(f"Error: Could not load template image from {template_path}")
+            return False
 
-            h, w = template_img.shape[:2]
-            # Capture a larger area around where the buff icon should be
-            capture_w = w * 3
-            capture_h = h * 3
-            # Get window dimensions
-            window_info = interactor_instance.get_window_info()
-            window_w = window_info['width']
+        h, w = template_img.shape[:2]
+        # Capture a larger area around where the buff icon should be
+        capture_w = w * 3
+        capture_h = h * 3
+        # Get window dimensions
+        window_info = interactor_instance.get_window_info()
+        window_w = window_info['width']
 
-            # Position the capture area in the buff bar region (typically upper right)
-            capture_x = max(0, window_w - capture_w - 100)  # 100 pixels from right edge
-            capture_y = 100  # 100 pixels from top
+        # Position the capture area in the buff bar region (typically upper right)
+        capture_x = max(0, window_w - capture_w - 100)  # 100 pixels from right edge
+        capture_y = 100  # 100 pixels from top
 
-            roi = (capture_x, capture_y, capture_w, capture_h)
+        roi = (capture_x, capture_y, capture_w, capture_h)
 
     # Capture the region
     screenshot = interactor_instance.capture(roi)
     if screenshot is None:
         print("Failed to capture screenshot for buff verification.")
-        return False, roi
+        return False
 
     # Find the buff icon in the screenshot
     _, bbox, _, correlation, status = find_image(template_path, screenshot)
 
     if status == 'Detected' and bbox is not None:
         print(f"Buff detected with correlation {correlation:.2f}")
-        # Update ROI for future checks based on where we found the buff
-        x, y, w, h = bbox
-        updated_roi = (roi[0] + x - w, roi[1] + y - h, w * 3, h * 3)
-        return True, updated_roi
+        return True
     else:
         print(f"Buff not detected (status: {status})")
-        return False, roi
+        return False
 
 # Configuration functions
 def load_config():
@@ -429,6 +425,54 @@ def get_buff_configuration(window_id=None):
     save_config(config_data)
     return True, buff_bar_roi
 
+# Buff activation function
+def activate_buff(key, buff_type, use_template, template_path, buff_bar_roi, interactor_instance):
+    """Activate a buff with optional verification."""
+    print(f"Activating buff '{key}'...")
+    interactor_instance.activate()
+
+    # For indefinite buffs, first check if it's already active
+    if buff_type == 3 and use_template:
+        buff_active = verify_buff_active(template_path, interactor_instance, buff_bar_roi)
+        if buff_active:
+            print(f"Buff '{key}' is already active. No need to activate.")
+            return True
+
+    # Activate the buff
+    attempt = 0
+    while script_running and not script_paused:
+        interactor_instance.activate()
+        if not interruptible_sleep(0.1): return False
+        interactor_instance.send_key(key)
+        if buff_type == 2:
+            print(f"Waiting for buff '{key}' to activate...")
+            if not interruptible_sleep(5): return False
+        if buff_type == 3:
+            print(f"Waiting for buff '{key}' to activate...")
+            if not interruptible_sleep(1.5): return False
+
+        # Verify activation if using template
+        if use_template:
+            print(f"Verifying buff activation (attempt {attempt+1})...")
+            buff_active = verify_buff_active(template_path, interactor_instance, buff_bar_roi)
+
+            if buff_active:
+                print(f"Buff '{key}' successfully activated!")
+                return True
+            else:
+                print(f"Buff '{key}' not detected. Trying again...")
+                if not interruptible_sleep(random.uniform(1.0, 1.5)): return False
+        else:
+            # If not using template, assume activation was successful
+            return True
+
+        attempt += 1
+        # For indefinite buffs, keep trying until successful
+        if buff_type != 3 and attempt >= 5:  # Limit attempts for non-indefinite buffs
+            print(f"Warning: Could not verify activation of buff '{key}' after {attempt} attempts.")
+            print(f"Continuing with scheduled activations...")
+            return False
+
 # Buff activation task
 def buff_task(buff_config, target_window_id, buff_bar_roi=None):
     global script_running, script_paused
@@ -442,7 +486,6 @@ def buff_task(buff_config, target_window_id, buff_bar_roi=None):
     use_template = buff_config.get('use_template', False)
     template_path = buff_config.get('template_path', None)
     active_time = buff_config.get('active_time', 0)
-    roi = None  # Region of interest for template matching
 
     # Print buff information
     print(f"Buff task started for key '{key}' (Interactor for window: {target_window_id}).")
@@ -466,48 +509,6 @@ def buff_task(buff_config, target_window_id, buff_bar_roi=None):
         use_template = False
         buff_type = 1  # Fallback to basic buff
 
-    # Function to activate the buff with verification
-    def activate_buff():
-        print(f"Activating buff '{key}'...")
-        interactor_instance.activate()
-
-        # For indefinite buffs, first check if it's already active
-        if buff_type == 3 and use_template:
-            buff_active, updated_roi = verify_buff_active(template_path, interactor_instance, roi, buff_bar_roi)
-            if buff_active:
-                print(f"Buff '{key}' is already active. No need to activate.")
-                return True, updated_roi
-
-        # Activate the buff
-        attempt = 0
-        while script_running and not script_paused:
-            interactor_instance.activate()
-            if not interruptible_sleep(0.1): return False, roi
-            interactor_instance.send_key(key)
-            if not interruptible_sleep(1.5): return False, roi
-
-            # Verify activation if using template
-            if use_template:
-                print(f"Verifying buff activation (attempt {attempt+1})...")
-                buff_active, updated_roi = verify_buff_active(template_path, interactor_instance, roi, buff_bar_roi)
-
-                if buff_active:
-                    print(f"Buff '{key}' successfully activated!")
-                    return True, updated_roi
-                else:
-                    print(f"Buff '{key}' not detected. Trying again...")
-                    if not interruptible_sleep(random.uniform(1.0, 1.5)): return False, roi
-            else:
-                # If not using template, assume activation was successful
-                return True, roi
-
-            attempt += 1
-            # For indefinite buffs, keep trying until successful
-            if buff_type != 3 and attempt >= 5:  # Limit attempts for non-indefinite buffs
-                print(f"Warning: Could not verify activation of buff '{key}' after {attempt} attempts.")
-                print(f"Continuing with scheduled activations...")
-                return False, roi
-
     # Calculate initial target expiry time
     target_expiry_time = 0
 
@@ -518,8 +519,7 @@ def buff_task(buff_config, target_window_id, buff_bar_roi=None):
     else:
         # Activate immediately if script is running and not paused
         if script_running and not script_paused:
-            _, updated_roi = activate_buff()
-            roi = updated_roi  # Update ROI for future checks
+            activate_buff(key, buff_type, use_template, template_path, buff_bar_roi, interactor_instance)
 
             # For duration-based buffs, set the next activation time
             if buff_type in [1, 2]:  # Basic or Fixed Duration
@@ -565,8 +565,7 @@ def buff_task(buff_config, target_window_id, buff_bar_roi=None):
                 # Check if it's time to activate
                 if current_time >= target_expiry_time:
                     if script_running:
-                        _, updated_roi = activate_buff()
-                        roi = updated_roi  # Update ROI for future checks
+                        activate_buff(key, buff_type, use_template, template_path, buff_bar_roi, interactor_instance)
 
                         # Set next activation time
                         random_subtract = random.uniform(5, 10) if duration > 15 else 0
@@ -583,13 +582,11 @@ def buff_task(buff_config, target_window_id, buff_bar_roi=None):
 
             elif buff_type == 3:  # Indefinite Image-Based Buff
                 # Check if buff is active
-                buff_active, updated_roi = verify_buff_active(template_path, interactor_instance, roi, buff_bar_roi)
-                roi = updated_roi  # Update ROI for future checks
+                buff_active = verify_buff_active(template_path, interactor_instance, buff_bar_roi)
 
                 if not buff_active:
                     print(f"Buff '{key}' is not active. Activating now...")
-                    _, updated_roi = activate_buff()
-                    roi = updated_roi  # Update ROI for future checks
+                    activate_buff(key, buff_type, use_template, template_path, buff_bar_roi, interactor_instance)
 
                 # Sleep briefly before checking again
                 if not interruptible_sleep(random.uniform(2.0, 3.0)): return
