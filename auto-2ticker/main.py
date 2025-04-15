@@ -32,6 +32,25 @@ interactor = X11WindowInteractor()
 reader = None  # EasyOCR reader instance will be initialized when needed
 
 # Helper functions
+def safe_input(prompt):
+    """A wrapper around input() that cleans any escape sequences from the input."""
+    user_input = input(prompt)
+    # Remove common escape sequences that might appear from function keys
+    cleaned_input = ''
+    i = 0
+    while i < len(user_input):
+        if user_input[i] == '\x1b' or user_input[i] == '^':
+            # Skip escape sequence
+            j = i
+            while j < len(user_input) and (j == i or user_input[j] != '~'):
+                j += 1
+            if j < len(user_input) and user_input[j] == '~':
+                i = j + 1  # Skip past the escape sequence
+                continue
+        cleaned_input += user_input[i]
+        i += 1
+    return cleaned_input
+
 def interruptible_sleep(seconds):
     """Sleep that can be interrupted by script_running being set to False."""
     global script_running
@@ -217,7 +236,7 @@ def capture_ocr_region(region_name, interactor_instance):
             print(f"Region preview saved to {img_path}")
 
             # Ask if user wants to test OCR (make it optional)
-            test_ocr = input("\nTest OCR on this region? This may take a moment. (yes/no) [no]: ").lower().strip()
+            test_ocr = safe_input("\nTest OCR on this region? This may take a moment. (yes/no) [no]: ").lower().strip()
             if test_ocr in ['yes', 'y']:
                 try:
                     print("Initializing OCR engine (this may take a few seconds)...")
@@ -298,7 +317,7 @@ def get_ocr_configuration(window_id=None):
                 print(f"   - Click position: {region['action']['position']}")
 
         while True:
-            choice = input("\nUse previous configuration? (yes/no) [yes]: ").lower().strip()
+            choice = safe_input("\nUse previous configuration? (yes/no) [yes]: ").lower().strip()
             if choice in ['yes', 'y', '']:
                 ocr_regions = previous_config['regions']
                 use_previous = True
@@ -318,7 +337,7 @@ def get_ocr_configuration(window_id=None):
             print("\n--- New OCR Region ---")
 
             # Get region name
-            region_name = input("Enter a name for this OCR region: ").strip()
+            region_name = safe_input("Enter a name for this OCR region: ").strip()
             if not region_name:
                 region_name = f"region_{len(ocr_regions)}"
                 print(f"Using default name: {region_name}")
@@ -336,7 +355,7 @@ def get_ocr_configuration(window_id=None):
 
             text_patterns = []
             while True:
-                pattern = input("Text pattern (or empty to finish): ").strip()
+                pattern = safe_input("Text pattern (or empty to finish): ").strip()
                 if not pattern:
                     if not text_patterns:
                         print("You must enter at least one text pattern.")
@@ -353,7 +372,7 @@ def get_ocr_configuration(window_id=None):
             action_type = 0
             while action_type not in [1, 2, 3]:
                 try:
-                    action_type = int(input("Select action type (1-3): ").strip())
+                    action_type = int(safe_input("Select action type (1-3): ").strip())
                     if action_type not in [1, 2, 3]:
                         print("Invalid selection. Please enter 1, 2, or 3.")
                 except ValueError:
@@ -378,7 +397,7 @@ def get_ocr_configuration(window_id=None):
                         'position': None  # Fallback to current position
                     }
             elif action_type == 3:
-                key = input("Enter the key to press: ").strip()
+                key = safe_input("Enter the key to press: ").strip()
                 action_config = {
                     'type': 'key',
                     'key': key
@@ -391,7 +410,7 @@ def get_ocr_configuration(window_id=None):
             scan_frequency = 0
             while scan_frequency <= 0:
                 try:
-                    scan_frequency = float(input("Enter scan frequency in seconds (e.g., 0.1): ").strip())
+                    scan_frequency = float(safe_input("Enter scan frequency in seconds (e.g., 0.1): ").strip())
                     if scan_frequency <= 0:
                         print("Frequency must be greater than 0. Please try again.")
                 except ValueError:
@@ -401,7 +420,7 @@ def get_ocr_configuration(window_id=None):
             cooldown = 0
             while cooldown < 0:
                 try:
-                    cooldown = float(input("Enter cooldown period in seconds after action (e.g., 0.5): ").strip())
+                    cooldown = float(safe_input("Enter cooldown period in seconds after action (e.g., 0.5): ").strip())
                     if cooldown < 0:
                         print("Cooldown cannot be negative. Please try again.")
                 except ValueError:
@@ -411,7 +430,7 @@ def get_ocr_configuration(window_id=None):
             confidence = 0
             while confidence <= 0 or confidence > 1:
                 try:
-                    confidence = float(input("Enter OCR confidence threshold (0.1-1.0) [0.6]: ").strip() or "0.6")
+                    confidence = float(safe_input("Enter OCR confidence threshold (0.1-1.0) [0.6]: ").strip() or "0.6")
                     if confidence <= 0 or confidence > 1:
                         print("Confidence must be between 0.1 and 1.0. Please try again.")
                 except ValueError:
@@ -432,7 +451,7 @@ def get_ocr_configuration(window_id=None):
 
             # Ask if user wants to add another region
             while True:
-                add_another = input("Add another OCR region? (yes/no) [yes]: ").lower().strip()
+                add_another = safe_input("Add another OCR region? (yes/no) [yes]: ").lower().strip()
                 if add_another in ['yes', 'y', '']:
                     break
                 elif add_another in ['no', 'n']:
@@ -586,6 +605,9 @@ def on_press(key):
     try:
         # Check for F11 and F12 keys
         if key == pkeyboard.Key.f11:  # F11 key to start/pause
+            # Clear the terminal line to prevent escape sequences from showing
+            print("\r", end="", flush=True)
+
             if not script_running:
                 try:
                     # Get the window ID first
@@ -631,6 +653,9 @@ def on_press(key):
                     print("--- Script Resumed ---")
 
         elif key == pkeyboard.Key.f12:  # F12 key to stop
+            # Clear the terminal line to prevent escape sequences from showing
+            print("\r", end="", flush=True)
+
             if script_running:
                 print("--- Stopping script immediately (F12 pressed) ---")
                 script_running = False
