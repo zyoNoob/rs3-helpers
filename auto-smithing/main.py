@@ -7,6 +7,7 @@ import threading
 import math
 import random
 import pynput.keyboard as pkeyboard
+import json
 from collections import Counter, deque
 from IPython.display import clear_output
 
@@ -38,7 +39,7 @@ last_attraction_activation_time = None
 # Stores scales for all template matches
 template_scales = {}
 
-# ROIS
+# Default ROIs (will be overridden by config.json if it exists)
 forge_roi = (1173, 267, 214, 215)
 anvil_roi = (1499, 597, 77, 106)
 primal_bar_roi = (1025, 697, 56, 60)
@@ -56,6 +57,10 @@ plus_5_roi = (1895, 571, 29, 24)
 burial_roi = (1947, 573, 58, 22)
 bagpack_roi = (1868, 1342, 442, 223)
 buff_roi = (1420, 1112, 420, 166)
+
+# Configuration file path
+script_dir = os.path.dirname(os.path.abspath(__file__))
+config_file = os.path.join(script_dir, 'config.json')
 
 RECALIBRATE = False
 
@@ -84,36 +89,203 @@ crafting_queue = deque()
 # --- End New Data Structures ---
 
 
-def calibrate(key):
-    print(f"SELECT {key} ROI")
-    roi = interactor.select_roi_interactive()
+# Configuration functions
+def load_config():
+    """Load configuration from config.json if it exists."""
+    # Ensure the config file path is absolute
+    abs_config_file = os.path.abspath(config_file)
+    print(f"Looking for config file at: {abs_config_file}")
+
+    if os.path.exists(abs_config_file):
+        try:
+            with open(abs_config_file, 'r') as f:
+                config_data = json.load(f)
+            print(f"Loaded configuration with {len(config_data.get('rois', {}))} ROIs")
+            return config_data
+        except json.JSONDecodeError:
+            print(f"Error: {abs_config_file} is not a valid JSON file.")
+        except Exception as e:
+            print(f"Error loading config: {e}")
+    else:
+        print(f"Config file not found at {abs_config_file}")
+        # Create a default config file if it doesn't exist
+        try:
+            default_config = {"rois": {}, "keybinds": {}}
+            with open(abs_config_file, 'w') as f:
+                json.dump(default_config, f, indent=4)
+            print(f"Created default config file at {abs_config_file}")
+        except Exception as e:
+            print(f"Error creating default config file: {e}")
+
+    return {"rois": {}, "keybinds": {}}
+
+def save_config(config_data):
+    """Save configuration to config.json."""
+    try:
+        # Ensure the config file path is absolute
+        abs_config_file = os.path.abspath(config_file)
+        print(f"Saving configuration to: {abs_config_file}")
+
+        with open(abs_config_file, 'w') as f:
+            json.dump(config_data, f, indent=4)
+        print(f"Configuration saved successfully")
+
+        # Verify the file was written correctly
+        if os.path.exists(abs_config_file):
+            with open(abs_config_file, 'r') as f:
+                saved_data = json.load(f)
+            roi_count = len(saved_data.get('rois', {}))
+            keybind_count = len(saved_data.get('keybinds', {}))
+            print(f"Verified saved configuration: {roi_count} ROIs, {keybind_count} keybinds")
+        else:
+            print(f"Warning: Config file not found after saving")
+    except Exception as e:
+        print(f"Error saving config: {e}")
+
+def safe_input(prompt):
+    """Safely handle input with proper escape sequence handling."""
+    try:
+        return input(prompt)
+    except EOFError:
+        print("\nInput interrupted. Using default value.")
+        return ""
+    except KeyboardInterrupt:
+        print("\nInput cancelled. Exiting.")
+        sys.exit(0)
+
+def calibrate(key, interactor_instance, config_data):
+    """Interactive calibration for a single ROI with user confirmation."""
+    print(f"\n--- Calibrating {key.upper()} ROI ---")
+    print(f"Please prepare the game window to show the {key} element.")
+    input("Press Enter when ready to select the ROI...")
+
+    roi = interactor_instance.select_roi_interactive()
+    if not roi:
+        print(f"ROI selection for {key} was cancelled or failed.")
+        return None
+
+    print(f"Selected ROI for {key}: {roi}")
+
+    # Update config data with the new ROI
+    if 'rois' not in config_data:
+        config_data['rois'] = {}
+
+    config_data['rois'][key] = roi
+
+    # Save after each ROI to prevent data loss
+    save_config(config_data)
+
     return roi
 
-# RECALIBRATION OF ROIS IF REQUIRED
+def get_smithing_configuration(window_id=None):
+    """Get smithing configuration through interactive calibration."""
+    # Create a new interactor instance for configuration
+    config_interactor = X11WindowInteractor(window_id=window_id)
 
-if RECALIBRATE:
-    print("Starting calibration using global interactor...")
-    rois = {
-        "forge": calibrate("forge"),
-        "anvil": calibrate("anvil"),
-        "primal_bar": calibrate("primal_bar"),
-        "primal_full_helm": calibrate("primal_full_helm"),
-        "primal_platelegs": calibrate("primal_platelegs"),
-        "primal_platebody": calibrate("primal_platebody"),
-        "primal_boots": calibrate("primal_boots"),
-        "primal_gauntlets": calibrate("primal_gauntlets"),
-        "base": calibrate("base"),
-        "plus_1": calibrate("plus_1"),
-        "plus_2": calibrate("plus_2"),
-        "plus_3": calibrate("plus_3"),
-        "plus_4": calibrate("plus_4"),
-        "plus_5": calibrate("plus_5"),
-        "burial": calibrate("burial"),
-        "bagpack": calibrate("bagpack"),
-        "buff": calibrate("buff"),
-    }
-    print("Calibration finished.")
+    # Check if previous configuration exists
+    config_data = load_config()
+    use_previous = False
+
+    if config_data and config_data.get('rois'):
+        print("\nPrevious configuration found:")
+        for key, roi in config_data['rois'].items():
+            print(f"{key}: {roi}")
+
+        while True:
+            choice = safe_input("\nUse previous configuration? (yes/no) [yes]: ").lower().strip()
+            if choice in ['yes', 'y', '']:
+                use_previous = True
+                break
+            elif choice in ['no', 'n']:
+                break
+            else:
+                print("Invalid input. Please enter 'yes' or 'no'.")
+
+    if not use_previous:
+        print("\n--- Starting ROI Calibration ---")
+        print("You will be asked to select regions of interest (ROIs) for various elements.")
+        print("For each element, you'll have time to prepare your game window before selection.")
+
+        # Define the ROIs to calibrate
+        roi_keys = [
+            "forge", "anvil", "primal_bar", "primal_full_helm", "primal_platelegs",
+            "primal_platebody", "primal_boots", "primal_gauntlets", "base",
+            "plus_1", "plus_2", "plus_3", "plus_4", "plus_5", "burial",
+            "bagpack", "buff"
+        ]
+
+        # Initialize or reset config data
+        if not config_data:
+            config_data = {"rois": {}, "keybinds": {}}
+
+        # Calibrate each ROI
+        for key in roi_keys:
+            roi = calibrate(key, config_interactor, config_data)
+            if roi is None:
+                print(f"Skipping {key} ROI configuration.")
+                # If a key ROI is missing, use default if available
+                default_roi_var = f"{key}_roi"
+                if default_roi_var in globals():
+                    config_data['rois'][key] = globals()[default_roi_var]
+                    print(f"Using default ROI for {key}: {globals()[default_roi_var]}")
+
+            # Ask if user wants to continue to next ROI
+            if key != roi_keys[-1]:  # If not the last ROI
+                while True:
+                    continue_choice = safe_input(f"Continue to next ROI ({roi_keys[roi_keys.index(key) + 1]})? (yes/no) [yes]: ").lower().strip()
+                    if continue_choice in ['yes', 'y', '']:
+                        break
+                    elif continue_choice in ['no', 'n']:
+                        print("Calibration process stopped by user.")
+                        return True, config_data
+                    else:
+                        print("Invalid input. Please enter 'yes' or 'no'.")
+
+        # Configure keybinds
+        print("\n--- Keybind Configuration ---")
+        print("Now let's configure the keybinds for various actions.")
+
+        keybind_configs = [
+            ("superheat_spell", "Superheat Item spell", "V"),
+            ("torstol_sticks", "Torstol Incense Sticks", "X"),
+            ("attraction_potion", "Attraction Potion", "Z"),
+            ("superheat_form", "Superheat Form prayer", "C"),
+            ("start_smithing", "Start smithing (space bar)", "space")
+        ]
+
+        for key, description, default in keybind_configs:
+            current = config_data.get('keybinds', {}).get(key, default)
+            while True:
+                new_key = safe_input(f"Enter key for {description} [current: {current}]: ").strip()
+                if not new_key:
+                    new_key = current
+
+                # Confirm the keybind
+                print(f"Setting {description} keybind to: '{new_key}'")
+                confirm = safe_input("Is this correct? (yes/no) [yes]: ").lower().strip()
+                if confirm in ['yes', 'y', '']:
+                    if 'keybinds' not in config_data:
+                        config_data['keybinds'] = {}
+                    config_data['keybinds'][key] = new_key
+                    break
+
+        # Save the final configuration
+        save_config(config_data)
+        print("\nConfiguration completed successfully!")
+
+    return True, config_data
+
+# Load configuration or use defaults
+config_data = load_config()
+rois = {}
+
+# Use ROIs from config or defaults
+if config_data and 'rois' in config_data and config_data['rois']:
+    for key, roi in config_data['rois'].items():
+        rois[key] = roi
+    print("Using ROIs from configuration file.")
 else:
+    # Use default ROIs
     rois = {
         "forge": forge_roi,
         "anvil": anvil_roi,
@@ -133,11 +305,28 @@ else:
         "bagpack": bagpack_roi,
         "buff": buff_roi,
     }
+    print("Using default ROIs.")
 
-# Printing ROIS for saving for later runs
+# Use keybinds from config or defaults
+if config_data and 'keybinds' in config_data and config_data['keybinds']:
+    # Update global keybind variables
+    for key, value in config_data['keybinds'].items():
+        globals()[key] = value
+    print("Using keybinds from configuration file.")
+
+# Force recalibration if requested
 if RECALIBRATE:
-    for i in rois:
-        print(f"{i}_roi = {rois[i]}")
+    print("RECALIBRATE flag is set. Starting forced recalibration...")
+    _, config_data = get_smithing_configuration(window_id=interactor.window_id)
+
+    # Update rois with new calibration data
+    if config_data and 'rois' in config_data:
+        rois = config_data['rois']
+
+    # Update keybinds with new calibration data
+    if config_data and 'keybinds' in config_data:
+        for key, value in config_data['keybinds'].items():
+            globals()[key] = value
 
 def find_image(template_path, screenshot, matcher=aggressive_matcher, scale=None):
     global template_scales
@@ -885,7 +1074,7 @@ def main_script(target_window_id):
 def on_press(key):
     global script_running, script_paused, interactor, auto_buff_management
     try:
-        # Check for F11 and F12 keys
+        # Check for F11, F12, and F10 keys
         if key == pkeyboard.Key.f11:  # F11 key to start/pause
             if not script_running:
                 # --- Configuration Step ---
@@ -936,6 +1125,35 @@ def on_press(key):
                     print("--- Script Resumed ---")
                     # Background threads will handle resuming timers automatically
 
+        elif key == pkeyboard.Key.f10:  # F10 key to recalibrate
+            if not script_running:
+                print("--- Starting Recalibration (F10 pressed) ---")
+                # Get the window ID
+                target_window_id = interactor.window_id
+                if target_window_id is None:
+                    print("Error: Could not determine target window ID from global interactor.")
+                    print("Please ensure the target window is active.")
+                    return
+
+                # Run the configuration process
+                _, new_config = get_smithing_configuration(window_id=target_window_id)
+
+                # Update global rois and keybinds
+                global rois
+                if new_config and 'rois' in new_config:
+                    rois = new_config['rois']
+                    print("ROIs updated successfully.")
+
+                if new_config and 'keybinds' in new_config:
+                    for key, value in new_config['keybinds'].items():
+                        globals()[key] = value
+                    print("Keybinds updated successfully.")
+
+                print("--- Recalibration Complete ---")
+                print("Press F11 to configure and start the script.")
+            else:
+                print("Cannot recalibrate while script is running. Stop the script first (F12).")
+
         elif key == pkeyboard.Key.f12:  # F12 key to stop
             if script_running:
                 print("--- Stopping script immediately (F12 pressed) ---")
@@ -949,6 +1167,7 @@ def on_press(key):
 
 
 def start_listener():
+    print("Press F10 to recalibrate ROIs and keybinds.")
     print("Press F11 to configure and start/pause the script.")
     print("Press F12 to stop the script immediately.")
     with pkeyboard.Listener(on_press=on_press) as listener:
