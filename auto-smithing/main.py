@@ -32,8 +32,11 @@ script_paused = False
 auto_buff_management = False
 initial_torstol_wait = 0 # Seconds
 initial_attraction_wait = 0 # Seconds
+initial_powerburst_wait = 0 # Seconds
 last_torstol_activation_time = None
 last_attraction_activation_time = None
+last_powerburst_activation_time = None
+in_smithing_loop = False  # Flag to track when we're in the smithing function loop
 # --- End New Buff Management Globals ---
 
 # Stores scales for all template matches
@@ -74,6 +77,7 @@ superheat_form_img = os.path.join(script_dir, 'assets/superheat_form.png')
 superheat_spell = 'V'
 torstol_sticks = 'X'
 attraction_potion = 'Z'
+powerburst = 'G'
 superheat_form = 'C'
 start_smithing = 'space'
 
@@ -249,6 +253,7 @@ def get_smithing_configuration(window_id=None):
             ("superheat_spell", "Superheat Item spell", "V"),
             ("torstol_sticks", "Torstol Incense Sticks", "X"),
             ("attraction_potion", "Attraction Potion", "Z"),
+            ("powerburst", "Powerburst", "G"),
             ("superheat_form", "Superheat Form prayer", "C"),
             ("start_smithing", "Start smithing (space bar)", "space")
         ]
@@ -426,7 +431,7 @@ def smith(item, tier, interactor_instance):
     """ Performs the smithing actions for a given item and tier.
         Returns True if the entire process completes, False if interrupted by stop signal.
     """
-    global script_running, script_paused # Ensure globals are accessible
+    global script_running, script_paused, in_smithing_loop # Ensure globals are accessible
 
     # Activate window just in case
     interactor_instance.activate() # Use passed interactor
@@ -471,10 +476,13 @@ def smith(item, tier, interactor_instance):
     if not interruptible_sleep(16.2): return False  # Wait for smithing on anvil
 
     # --- Superheat Loop ---
+    in_smithing_loop = True  # Set flag to indicate we're in the smithing loop
     while script_running: # Check stop flag at the start of each loop iteration
         # Handle pause state before doing anything in the loop
         while script_paused:
-            if not script_running: return False # Allow stop during pause
+            if not script_running:
+                in_smithing_loop = False  # Reset flag when stopping
+                return False # Allow stop during pause
             time.sleep(0.1) # Short sleep while paused
 
         # Find Bar in bag
@@ -510,6 +518,9 @@ def smith(item, tier, interactor_instance):
         else:
             print("No more bars found in bagpack or bar not detected. Ending superheat loop.")
             break  # Exit superheat loop if no bars found
+
+    # Reset the smithing loop flag when exiting the loop
+    in_smithing_loop = False
     # --- End Superheat Loop ---
 
     # If we reached here, the smith function completed its course without being stopped.
@@ -725,13 +736,13 @@ def get_crafting_requests():
 
 # --- New Configuration Function ---
 def configure_script_settings():
-    global auto_buff_management, initial_torstol_wait, initial_attraction_wait
+    global auto_buff_management, initial_torstol_wait, initial_attraction_wait, initial_powerburst_wait
 
     print("\n--- Script Configuration ---")
 
     # 1. Ask about Auto Buff Management
     while True:
-        choice = input("Enable automatic buff management (Torstol Sticks & Attraction Potion)? (yes/no) [yes]: ").lower().strip()
+        choice = input("Enable automatic buff management (Torstol Sticks, Attraction Potion & Powerburst)? (yes/no) [yes]: ").lower().strip()
         if choice in ['yes', 'y', '']:
             auto_buff_management = True
             print("Automatic buff management ENABLED.")
@@ -782,6 +793,23 @@ def configure_script_settings():
                     print("Duration cannot be negative.")
             except ValueError:
                 print("Invalid input. Please enter a number (e.g., 12 or 0).")
+
+        # Powerburst
+        while True:
+            try:
+                duration_str = input("  - Remaining Powerburst duration (minutes)? ").strip()
+                if not duration_str:
+                    initial_powerburst_wait = 0
+                    break
+                duration_min = float(duration_str)
+                if duration_min >= 0:
+                    initial_powerburst_wait = int(duration_min * 60) # Convert to seconds
+                    print(f"    -> Will wait {initial_powerburst_wait} seconds before first Powerburst activation.")
+                    break
+                else:
+                    print("Duration cannot be negative.")
+            except ValueError:
+                print("Invalid input. Please enter a number (e.g., 1.5 or 0).")
 
     print("---------------------------\n")
     return True # Configuration successful
@@ -951,6 +979,81 @@ def attraction_task(target_window_id):
             if not interruptible_sleep(5): return # Use interruptible sleep in except block
 
     print("Attraction potion thread finished.")
+
+
+def powerburst_task(target_window_id):
+    global script_running, script_paused, auto_buff_management, initial_powerburst_wait, last_powerburst_activation_time, in_smithing_loop
+    if not auto_buff_management:
+        print("Powerburst task skipped (auto-management disabled).")
+        return
+
+    interactor_instance = X11WindowInteractor(window_id=target_window_id)
+    print(f"Powerburst thread started (Interactor for window: {target_window_id}).")
+
+    target_expiry_time = 0
+    next_interval = random.uniform(118, 122)  # ~2 minutes (120 seconds)
+
+    # Calculate initial target expiry time
+    if initial_powerburst_wait > 0:
+        target_expiry_time = time.time() + initial_powerburst_wait
+        print(f"Powerburst: Initial wait set. Next check/activation around {time.strftime('%H:%M:%S', time.localtime(target_expiry_time))}")
+    else:
+        # Don't activate immediately - wait until we're in the smithing loop
+        last_powerburst_activation_time = time.time()  # Pretend it just activated
+        target_expiry_time = last_powerburst_activation_time + next_interval
+        print(f"Powerburst: Scheduling first activation around {time.strftime('%H:%M:%S', time.localtime(target_expiry_time))}")
+
+    while script_running:
+        try:
+            # --- Main Sleep Loop using interruptible_sleep ---
+            now = time.time()
+            while now < target_expiry_time:
+                if not script_running:
+                    print("Powerburst thread stopping during wait.")
+                    return
+
+                # Calculate remaining time until expiry
+                remaining = target_expiry_time - now
+                # Sleep for a short interval or until expiry, whichever is less
+                sleep_duration = min(0.2, remaining)
+
+                # Use interruptible_sleep for the main wait interval
+                if not interruptible_sleep(sleep_duration):
+                    # If sleep was interrupted by stop signal, exit
+                    return
+
+                # Update 'now' after sleeping
+                now = time.time()
+            # --- End Main Sleep Loop ---
+
+            # Time is up, activate if still running AND we're in the smithing loop
+            if script_running and in_smithing_loop:
+                print("Activating Powerburst...")
+                interactor_instance.send_key(powerburst)
+                interactor_instance.send_key(powerburst)
+                interactor_instance.send_key(powerburst)
+                last_powerburst_activation_time = time.time()
+                # Use interruptible_sleep after activation
+                if not interruptible_sleep(random.uniform(0.6, 0.8)): return
+
+                # Calculate NEXT target expiry time
+                next_interval = random.uniform(118, 122)  # ~2 minutes
+                target_expiry_time = last_powerburst_activation_time + next_interval
+                print(f"Powerburst: Next activation scheduled around {time.strftime('%H:%M:%S', time.localtime(target_expiry_time))}")
+            elif script_running:
+                # We're not in the smithing loop, so check again soon
+                print("Powerburst: Not in smithing loop, checking again in 5 seconds...")
+                target_expiry_time = time.time() + 5  # Check again in 5 seconds
+            else:
+                print("Powerburst thread stopping before activation.")
+                return  # Script stopped
+
+        except Exception as e:
+            print(f"Error in powerburst_task: {e}")
+            print("Waiting before retrying loop...")
+            if not interruptible_sleep(5): return  # Use interruptible sleep in except block
+
+    print("Powerburst thread finished.")
 # --- End Background Task Functions ---
 
 
@@ -1112,6 +1215,7 @@ def on_press(key):
                 if auto_buff_management:
                     threading.Thread(target=torstol_task, args=(target_window_id,), daemon=True).start()
                     threading.Thread(target=attraction_task, args=(target_window_id,), daemon=True).start()
+                    threading.Thread(target=powerburst_task, args=(target_window_id,), daemon=True).start()
                 else:
                     print("Skipping buff management threads as they are disabled.")
 
