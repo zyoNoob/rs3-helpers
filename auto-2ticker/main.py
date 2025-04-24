@@ -425,17 +425,17 @@ def get_ocr_configuration(window_id=None):
             scan_frequency = 0
             while scan_frequency <= 0:
                 try:
-                    scan_frequency = float(safe_input("Enter scan frequency in seconds (e.g., 0.1): ").strip())
+                    scan_frequency = float(safe_input("Enter scan frequency in seconds (e.g., 0.1) [0.1]: ").strip() or "0.1")
                     if scan_frequency <= 0:
                         print("Frequency must be greater than 0. Please try again.")
                 except ValueError:
                     print("Invalid input. Please enter a number.")
 
             # Get cooldown period
-            cooldown = 0
+            cooldown = -1
             while cooldown < 0:
                 try:
-                    cooldown = float(safe_input("Enter cooldown period in seconds after action (e.g., 0.5): ").strip())
+                    cooldown = float(safe_input("Enter cooldown period in seconds after action (e.g., 0.1) [0.6]: ").strip() or "0.6")
                     if cooldown < 0:
                         print("Cooldown cannot be negative. Please try again.")
                 except ValueError:

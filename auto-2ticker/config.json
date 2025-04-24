@@ -3,10 +3,10 @@
         {
             "name": "xp_alert",
             "area": [
-                1275,
-                0,
-                307,
-                182
+                1731,
+                351,
+                431,
+                226
             ],
             "text_patterns": [
                 "xp"
@@ -14,10 +14,10 @@
             "action": {
                 "type": "click_region",
                 "region": [
-                    1863,
-                    658,
-                    167,
-                    169
+                    2067,
+                    817,
+                    140,
+                    85
                 ]
             },
             "scan_frequency": 0.1,
