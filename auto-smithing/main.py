@@ -440,7 +440,7 @@ def smith(item, tier, interactor_instance):
     x, y, w, h = rois["forge"]
     click_x, click_y = randomize_click_position(x, y, w, h, shape='rectangle', roi_diminish=2)
     interactor_instance.click(click_x, click_y) # Use passed interactor
-    if not interruptible_sleep(random.uniform(1.2, 1.4)): return False
+    if not interruptible_sleep(random.uniform(2.4, 2.5)): return False
 
     # Select Bar
     x, y, w, h = rois["primal_bar"]
