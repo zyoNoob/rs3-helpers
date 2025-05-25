@@ -1,0 +1,53 @@
+{
+    "rois": {
+        "progress_bar": [
+            1209,
+            529,
+            463,
+            33
+        ],
+        "start_craft_button": [
+            1420,
+            1006,
+            376,
+            28
+        ],
+        "bank_access": [
+            1465,
+            604,
+            84,
+            90
+        ],
+        "load_preset_button": [
+            350,
+            350,
+            150,
+            50
+        ],
+        "bagpack": [
+            1868,
+            1342,
+            442,
+            223
+        ],
+        "crafting_station": [
+            1204,
+            54,
+            171,
+            127
+        ]
+    },
+    "keybinds": {
+        "torstol_sticks_key": "X",
+        "attraction_potion_key": "Z",
+        "start_craft_key": "space"
+    },
+    "settings": {
+        "auto_buff_management": false,
+        "enable_banking": false,
+        "enable_item_selection": false,
+        "enable_crafting_station_click": true,
+        "progress_bar_debug_mode": false,
+        "progress_check_frequency": 0.3
+    }
+}
