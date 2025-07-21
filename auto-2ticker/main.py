@@ -156,8 +156,22 @@ def perform_ocr(image, text_patterns, confidence_threshold=0.6):
         print(f"OCR error: {e}")
         return False, []
 
+    # Always print all OCR text detected
+    print("OCR detected text:")
+    if results:
+        for result in results:
+            # Handle different result formats (some versions return 3 values, some 4)
+            if len(result) >= 3:
+                # Extract text and confidence (ignore bbox)
+                _, text, confidence = result[:3]
+                print(f"  Text: '{text}', Confidence: {confidence:.2f}")
+    else:
+        print("  No text detected")
+
     # Check for text patterns
     matched_patterns = []
+    
+    # First, check individual text results
     for result in results:
         # Handle different result formats (some versions return 3 values, some 4)
         if len(result) >= 3:
@@ -168,6 +182,33 @@ def perform_ocr(image, text_patterns, confidence_threshold=0.6):
                 for pattern in text_patterns:
                     if pattern.lower() in text.lower():
                         matched_patterns.append((pattern, text, confidence))
+    
+    # Second, combine all text and check patterns against the combined text
+    # This handles cases where patterns span multiple OCR results
+    combined_text = ""
+    combined_confidence = 0
+    valid_results_count = 0
+    
+    for result in results:
+        if len(result) >= 3:
+            _, text, confidence = result[:3]
+            if confidence >= confidence_threshold:
+                combined_text += text + " "
+                combined_confidence += confidence
+                valid_results_count += 1
+    
+    # Calculate average confidence for combined text
+    if valid_results_count > 0:
+        combined_confidence = combined_confidence / valid_results_count
+        combined_text = combined_text.strip()
+        
+        # Check patterns against combined text
+        for pattern in text_patterns:
+            if pattern.lower() in combined_text.lower():
+                # Only add if not already found in individual results
+                pattern_already_found = any(match[0] == pattern for match in matched_patterns)
+                if not pattern_already_found:
+                    matched_patterns.append((pattern, combined_text, combined_confidence))
 
     return len(matched_patterns) > 0, matched_patterns
 

@@ -18,5 +18,5 @@ dependencies = [
     "python-xlib>=0.33",
 ]
 
-[tool.uv.sources]
-opencv-contrib-python = { url = "https://github.com/zyoNoob/scale-invariant-template-matching/raw/refs/heads/main/whl/opencv_contrib_python-4.11.0.86-cp313-cp313-linux_x86_64.whl" }
+#[tool.uv.sources]
+#opencv-contrib-python = { url = "https://github.com/zyoNoob/scale-invariant-template-matching/raw/refs/heads/main/whl/opencv_contrib_python-4.11.0.86-cp313-cp313-linux_x86_64.whl" }
