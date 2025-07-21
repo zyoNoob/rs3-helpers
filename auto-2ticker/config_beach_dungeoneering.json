@@ -22,7 +22,7 @@
                 ]
             },
             "scan_frequency": 0.1,
-            "cooldown": 0.6,
+            "cooldown": 5,
             "confidence_threshold": 0.6
         }
     ]
