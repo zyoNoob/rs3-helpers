@@ -9,7 +9,8 @@
                 79
             ],
             "text_patterns": [
-                "20 floors"
+                "20 floors",
+                "60 floors"
             ],
             "action": {
                 "type": "click_region",
