@@ -15,15 +15,15 @@
             "action": {
                 "type": "click_region",
                 "region": [
-                    1201,
-                    379,
-                    132,
-                    163
+                    987,
+                    393,
+                    155,
+                    122
                 ]
             },
             "scan_frequency": 0.1,
             "cooldown": 0.6,
-            "confidence_threshold": 0.25
+            "confidence_threshold": 0.6
         }
     ]
 }

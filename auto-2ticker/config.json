@@ -1,24 +1,24 @@
 {
     "regions": [
         {
-            "name": "DungeoneeringHole",
+            "name": "xp_alert",
             "area": [
-                840,
-                112,
+                855,
                 200,
-                79
+                254,
+                153
             ],
             "text_patterns": [
-                "20 floors",
-                "60 floors"
+                "xp",
+                "#p"
             ],
             "action": {
                 "type": "click_region",
                 "region": [
-                    650,
-                    567,
-                    395,
-                    228
+                    987,
+                    393,
+                    155,
+                    122
                 ]
             },
             "scan_frequency": 0.1,

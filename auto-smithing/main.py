@@ -29,13 +29,28 @@ script_running = False
 script_paused = False
 
 # --- New Buff Management Globals ---
-auto_buff_management = False
+# Independent buff configuration
+enable_torstol_sticks = False
+enable_attraction_potion = False
+enable_powerburst = False
+enable_superheat_form = False
+
+# Initial wait times for each buff
 initial_torstol_wait = 0 # Seconds
 initial_attraction_wait = 0 # Seconds
 initial_powerburst_wait = 0 # Seconds
+initial_superheat_form_wait = 0 # Seconds
+
+# Last activation times
 last_torstol_activation_time = None
 last_attraction_activation_time = None
 last_powerburst_activation_time = None
+last_superheat_form_activation_time = None
+
+# Heating method configuration
+heating_method = "superheat_spell"  # Options: "superheat_spell" or "forge"
+forge_heating_duration = 3.0  # Duration to wait for forge heating (seconds)
+
 in_smithing_loop = False  # Flag to track when we're in the smithing function loop
 # --- End New Buff Management Globals ---
 
@@ -45,12 +60,12 @@ template_scales = {}
 # Default ROIs (will be overridden by config.json if it exists)
 forge_roi = (1173, 267, 214, 215)
 anvil_roi = (1499, 597, 77, 106)
-primal_bar_roi = (1025, 697, 56, 60)
-primal_full_helm_roi = (1245, 547, 54, 54)
-primal_platelegs_roi = (1320, 547, 55, 54)
-primal_platebody_roi = (1397, 544, 55, 58)
-primal_boots_roi = (1244, 621, 56, 55)
-primal_gauntlets_roi = (1320, 622, 57, 55)
+metal_bar_roi = (1025, 697, 56, 60)
+metal_full_helm_roi = (1245, 547, 54, 54)
+metal_platelegs_roi = (1320, 547, 55, 54)
+metal_platebody_roi = (1397, 544, 55, 58)
+metal_boots_roi = (1244, 621, 56, 55)
+metal_gauntlets_roi = (1320, 622, 57, 55)
 base_roi = (1611, 571, 61, 25)
 plus_1_roi = (1691, 571, 31, 27)
 plus_2_roi = (1742, 573, 26, 23)
@@ -83,12 +98,15 @@ start_smithing = 'space'
 
 # --- New Data Structures ---
 available_items = [
-    "primal_full_helm", "primal_platelegs", "primal_platebody",
-    "primal_boots", "primal_gauntlets"
+    "metal_full_helm", "metal_platelegs", "metal_platebody",
+    "metal_boots", "metal_gauntlets"
 ]
-ordered_tiers = [
+# Default tier progression (can be customized during configuration)
+all_possible_tiers = [
     "base", "plus_1", "plus_2", "plus_3", "plus_4", "plus_5", "burial"
 ]
+# Active tiers for current metal type (configured during startup)
+ordered_tiers = all_possible_tiers.copy()  # Default to all tiers
 crafting_queue = deque()
 # --- End New Data Structures ---
 
@@ -96,6 +114,10 @@ crafting_queue = deque()
 # Configuration functions
 def load_config():
     """Load configuration from config.json if it exists."""
+    global ordered_tiers, heating_method, forge_heating_duration
+    global enable_torstol_sticks, enable_attraction_potion, enable_powerburst, enable_superheat_form
+    global initial_torstol_wait, initial_attraction_wait, initial_powerburst_wait, initial_superheat_form_wait
+    
     # Ensure the config file path is absolute
     abs_config_file = os.path.abspath(config_file)
     print(f"Looking for config file at: {abs_config_file}")
@@ -105,6 +127,48 @@ def load_config():
             with open(abs_config_file, 'r') as f:
                 config_data = json.load(f)
             print(f"Loaded configuration with {len(config_data.get('rois', {}))} ROIs")
+            
+            # Load tier configuration if available
+            if 'tiers' in config_data:
+                ordered_tiers = config_data['tiers']
+                print(f"Loaded tier configuration: {' → '.join(ordered_tiers)}")
+            
+            # Load heating method configuration if available
+            if 'heating_method' in config_data:
+                heating_config = config_data['heating_method']
+                heating_method = heating_config.get('method', 'superheat_spell')
+                forge_heating_duration = heating_config.get('forge_heating_duration', 3.0)
+                print(f"Loaded heating method: {heating_method}")
+                if heating_method == 'forge':
+                    print(f"Forge heating duration: {forge_heating_duration} seconds")
+            
+            # Load buff configuration if available
+            if 'buffs' in config_data:
+                buff_config = config_data['buffs']
+                enable_torstol_sticks = buff_config.get('enable_torstol_sticks', False)
+                enable_attraction_potion = buff_config.get('enable_attraction_potion', False)
+                enable_powerburst = buff_config.get('enable_powerburst', False)
+                enable_superheat_form = buff_config.get('enable_superheat_form', False)
+                
+                # Load initial durations
+                if 'initial_durations' in buff_config:
+                    durations = buff_config['initial_durations']
+                    initial_torstol_wait = durations.get('torstol_wait', 0)
+                    initial_attraction_wait = durations.get('attraction_wait', 0)
+                    initial_powerburst_wait = durations.get('powerburst_wait', 0)
+                    initial_superheat_form_wait = durations.get('superheat_form_wait', 0)
+                
+                enabled_buffs = []
+                if enable_torstol_sticks: enabled_buffs.append("Torstol Sticks")
+                if enable_attraction_potion: enabled_buffs.append("Attraction Potion")
+                if enable_powerburst: enabled_buffs.append("Powerburst")
+                if enable_superheat_form: enabled_buffs.append("Superheat Form")
+                
+                if enabled_buffs:
+                    print(f"Loaded buff configuration: {', '.join(enabled_buffs)} enabled")
+                else:
+                    print("Loaded buff configuration: All buffs disabled")
+            
             return config_data
         except json.JSONDecodeError:
             print(f"Error: {abs_config_file} is not a valid JSON file.")
@@ -114,14 +178,46 @@ def load_config():
         print(f"Config file not found at {abs_config_file}")
         # Create a default config file if it doesn't exist
         try:
-            default_config = {"rois": {}, "keybinds": {}}
+            default_config = {
+                "rois": {},
+                "keybinds": {},
+                "tiers": all_possible_tiers.copy(),
+                "heating_method": {
+                    "method": "superheat_spell",
+                    "forge_heating_duration": 3.0
+                },
+                "buffs": {
+                    "enable_torstol_sticks": False,
+                    "enable_attraction_potion": False,
+                    "enable_powerburst": False,
+                    "enable_superheat_form": False,
+                    "initial_durations": {
+                        "torstol_wait": 0,
+                        "attraction_wait": 0,
+                        "powerburst_wait": 0,
+                        "superheat_form_wait": 0
+                    }
+                }
+            }
             with open(abs_config_file, 'w') as f:
                 json.dump(default_config, f, indent=4)
             print(f"Created default config file at {abs_config_file}")
         except Exception as e:
             print(f"Error creating default config file: {e}")
 
-    return {"rois": {}, "keybinds": {}}
+    return {
+        "rois": {},
+        "keybinds": {},
+        "tiers": all_possible_tiers.copy(),
+        "heating_method": {"method": "superheat_spell", "forge_heating_duration": 3.0},
+        "buffs": {
+            "enable_torstol_sticks": False,
+            "enable_attraction_potion": False,
+            "enable_powerburst": False,
+            "enable_superheat_form": False,
+            "initial_durations": {"torstol_wait": 0, "attraction_wait": 0, "powerburst_wait": 0, "superheat_form_wait": 0}
+        }
+    }
 
 def save_config(config_data):
     """Save configuration to config.json."""
@@ -212,8 +308,8 @@ def get_smithing_configuration(window_id=None):
 
         # Define the ROIs to calibrate
         roi_keys = [
-            "forge", "anvil", "primal_bar", "primal_full_helm", "primal_platelegs",
-            "primal_platebody", "primal_boots", "primal_gauntlets", "base",
+            "forge", "anvil", "metal_bar", "metal_full_helm", "metal_platelegs",
+            "metal_platebody", "metal_boots", "metal_gauntlets", "base",
             "plus_1", "plus_2", "plus_3", "plus_4", "plus_5", "burial",
             "bagpack", "buff"
         ]
@@ -294,12 +390,12 @@ else:
     rois = {
         "forge": forge_roi,
         "anvil": anvil_roi,
-        "primal_bar": primal_bar_roi,
-        "primal_full_helm": primal_full_helm_roi,
-        "primal_platelegs": primal_platelegs_roi,
-        "primal_platebody": primal_platebody_roi,
-        "primal_boots": primal_boots_roi,
-        "primal_gauntlets": primal_gauntlets_roi,
+        "metal_bar": metal_bar_roi,
+        "metal_full_helm": metal_full_helm_roi,
+        "metal_platelegs": metal_platelegs_roi,
+        "metal_platebody": metal_platebody_roi,
+        "metal_boots": metal_boots_roi,
+        "metal_gauntlets": metal_gauntlets_roi,
         "base": base_roi,
         "plus_1": plus_1_roi,
         "plus_2": plus_2_roi,
@@ -443,7 +539,7 @@ def smith(item, tier, interactor_instance):
     if not interruptible_sleep(random.uniform(2.4, 2.5)): return False
 
     # Select Bar
-    x, y, w, h = rois["primal_bar"]
+    x, y, w, h = rois["metal_bar"]
     click_x, click_y = randomize_click_position(x, y, w, h, shape='rectangle', roi_diminish=2)
     interactor_instance.click(click_x, click_y) # Use passed interactor
     if not interruptible_sleep(random.uniform(1.2, 1.4)): return False
@@ -475,8 +571,10 @@ def smith(item, tier, interactor_instance):
     interactor_instance.click(click_x, click_y) # Use passed interactor
     if not interruptible_sleep(16.2): return False  # Wait for smithing on anvil
 
-    # --- Superheat Loop ---
+    # --- Heating Loop (Superheat Spell or Forge) ---
     in_smithing_loop = True  # Set flag to indicate we're in the smithing loop
+    global heating_method, forge_heating_duration
+    
     while script_running: # Check stop flag at the start of each loop iteration
         # Handle pause state before doing anything in the loop
         while script_paused:
@@ -498,30 +596,54 @@ def smith(item, tier, interactor_instance):
         if bar_data and bar_data[-1] == 'Detected':
             _, bbox, _, _, _ = bar_data
             if bbox is None:
-                print("Bar detected but bbox is None. Skipping superheat.")
-                break # Exit superheat loop
+                print("Bar detected but bbox is None. Skipping heating.")
+                break # Exit heating loop
 
-            # Click superheat spell hotkey
-            interactor_instance.send_key(superheat_spell) # Use passed interactor
-            if not interruptible_sleep(random.uniform(0.6, 0.65)): return False
+            if heating_method == "superheat_spell":
+                # Original superheat spell method
+                interactor_instance.send_key(superheat_spell) # Use passed interactor
+                if not interruptible_sleep(random.uniform(0.6, 0.65)): return False
 
-            # Click on the bar
-            bar_x_rel, bar_y_rel, bar_w, bar_h = bbox
-            bag_x, bag_y, _, _ = rois["bagpack"]
-            bar_x_abs = bag_x + bar_x_rel
-            bar_y_abs = bag_y + bar_y_rel
+                # Click on the bar
+                bar_x_rel, bar_y_rel, bar_w, bar_h = bbox
+                bag_x, bag_y, _, _ = rois["bagpack"]
+                bar_x_abs = bag_x + bar_x_rel
+                bar_y_abs = bag_y + bar_y_rel
 
-            click_x, click_y = randomize_click_position(bar_x_abs, bar_y_abs, bar_w, bar_h, shape='rectangle', roi_diminish=2)
-            interactor_instance.click(click_x, click_y) # Use passed interactor
-            print(f"Superheating bar at ({click_x}, {click_y})")
-            if not interruptible_sleep(random.uniform(16.2, 16.8)): return False  # Wait for superheat cooldown/action
+                click_x, click_y = randomize_click_position(bar_x_abs, bar_y_abs, bar_w, bar_h, shape='rectangle', roi_diminish=2)
+                interactor_instance.click(click_x, click_y) # Use passed interactor
+                print(f"Superheating bar at ({click_x}, {click_y})")
+                if not interruptible_sleep(random.uniform(16.2, 16.8)): return False  # Wait for superheat cooldown/action
+                
+            elif heating_method == "forge":
+                # New forge reheating method
+                print("Using forge to reheat items...")
+                
+                # Click on the forge
+                x, y, w, h = rois["forge"]
+                click_x, click_y = randomize_click_position(x, y, w, h, shape='rectangle', roi_diminish=2)
+                interactor_instance.click(click_x, click_y)
+                print(f"Clicking forge for reheating at ({click_x}, {click_y})")
+                
+                # Wait for forge heating duration
+                if not interruptible_sleep(forge_heating_duration): return False
+                
+                # Click on anvil to start smithing again
+                x, y, w, h = rois["anvil"]
+                click_x, click_y = randomize_click_position(x, y, w, h, shape='rectangle', roi_diminish=2)
+                interactor_instance.click(click_x, click_y)
+                print(f"Clicking anvil for smithing at ({click_x}, {click_y})")
+                
+                # Continue with anvil work (similar timing to superheat method)
+                if not interruptible_sleep(random.uniform(16.2, 16.8)): return False
+                
         else:
-            print("No more bars found in bagpack or bar not detected. Ending superheat loop.")
-            break  # Exit superheat loop if no bars found
+            print("No more bars found in bagpack or bar not detected. Ending heating loop.")
+            break  # Exit heating loop if no bars found
 
     # Reset the smithing loop flag when exiting the loop
     in_smithing_loop = False
-    # --- End Superheat Loop ---
+    # --- End Heating Loop ---
 
     # If we reached here, the smith function completed its course without being stopped.
     # Return True only if the script is still marked as running.
@@ -634,15 +756,15 @@ def get_crafting_requests():
         print("Available Items:")
         for i, item_name in enumerate(available_items):
             print(f"  {i+1}: {item_name}")
-        print("\nAvailable Tiers:")
+        print(f"\nAvailable Tiers (configured for current metal):")
         for i, tier_name in enumerate(ordered_tiers):
              print(f"  {i+1}: {tier_name}")
 
         print("\nEnter requests in the format: <item#> <target_tier#> [quantity] [h<have_tier#>]")
-        print("Example: '1 7 5 h2' -> 5x Item#1 to Tier#7, you HAVE Tier#2 from the list (which is plus_1)")
-        print("Example: '2 8 10' -> 10x Item#2 to Tier#8, you HAVE none (starts from base)")
-        print("Example: '3 6' -> 1x Item#3 to Tier#6, you HAVE none")
-        print("*** Important: Use the number from the list for h<have_tier#>. 'h0' or omitting means you have none. ***")
+        print(f"Example: '1 {len(ordered_tiers)} 5 h2' -> 5x Item#1 to final tier, you HAVE Tier#2 from the list")
+        print(f"Example: '2 {len(ordered_tiers)-1} 10' -> 10x Item#2 to second-to-last tier, you HAVE none (starts from base)")
+        print("Example: '3 3' -> 1x Item#3 to 3rd tier, you HAVE none")
+        print("*** Important: Use the number from the tier list above for h<have_tier#>. 'h0' or omitting means you have none. ***")
         print("Enter 'done' when finished.")
 
         while True:
@@ -734,83 +856,320 @@ def get_crafting_requests():
     return total_tasks > 0
 # --- End New Input and Queue Logic ---
 
+# --- Tier Configuration Function ---
+def configure_metal_tiers():
+    """Configure which tiers are available for the current metal type."""
+    global ordered_tiers, all_possible_tiers
+    
+    print("\n--- Metal Tier Configuration ---")
+    print("Different metals may have different available upgrade tiers.")
+    print("For example, some metals might go: base → +1 → +2 → +3 → burial (skipping +4, +5)")
+    print("While others have the full progression: base → +1 → +2 → +3 → +4 → +5 → burial")
+    
+    print(f"\nAll possible tiers: {', '.join(all_possible_tiers)}")
+    
+    # Load existing configuration
+    config_data = load_config()
+    if 'tiers' in config_data and config_data['tiers']:
+        print(f"Current configured tiers: {' → '.join(config_data['tiers'])}")
+        while True:
+            use_existing = input("Use existing tier configuration? (yes/no) [yes]: ").lower().strip()
+            if use_existing in ['yes', 'y', '']:
+                ordered_tiers = config_data['tiers']
+                print(f"Using existing tier configuration: {' → '.join(ordered_tiers)}")
+                return True
+            elif use_existing in ['no', 'n']:
+                break
+            else:
+                print("Invalid input. Please enter 'yes' or 'no'.")
+    
+    while True:
+        choice = input("Do you want to customize the available tiers for your metal? (yes/no) [no]: ").lower().strip()
+        if choice in ['no', 'n', '']:
+            print("Using default tier progression (all tiers available).")
+            ordered_tiers = all_possible_tiers.copy()
+            break
+        elif choice in ['yes', 'y']:
+            print("\n--- Custom Tier Selection ---")
+            print("Select which tiers are available for your metal type.")
+            print("Note: 'base' is always required and will be included automatically.")
+            
+            selected_tiers = ["base"]  # Base is always required
+            
+            # Ask about each tier after base
+            for tier in all_possible_tiers[1:]:  # Skip 'base' since it's always included
+                while True:
+                    tier_choice = input(f"Is '{tier}' available for your metal? (yes/no) [yes]: ").lower().strip()
+                    if tier_choice in ['yes', 'y', '']:
+                        selected_tiers.append(tier)
+                        print(f"  ✓ {tier} included")
+                        break
+                    elif tier_choice in ['no', 'n']:
+                        print(f"  ✗ {tier} skipped")
+                        break
+                    else:
+                        print("Invalid input. Please enter 'yes' or 'no'.")
+            
+            # Validate that we have at least base and one upgrade tier
+            if len(selected_tiers) < 2:
+                print("Warning: You need at least one upgrade tier besides 'base'. Adding 'plus_1'.")
+                if "plus_1" not in selected_tiers:
+                    selected_tiers.append("plus_1")
+            
+            ordered_tiers = selected_tiers
+            print(f"\nConfigured tier progression: {' → '.join(ordered_tiers)}")
+            
+            # Confirm the selection
+            while True:
+                confirm = input("Is this tier progression correct? (yes/no) [yes]: ").lower().strip()
+                if confirm in ['yes', 'y', '']:
+                    # Save the tier configuration
+                    config_data['tiers'] = ordered_tiers
+                    save_config(config_data)
+                    print("Tier configuration saved.")
+                    break
+                elif confirm in ['no', 'n']:
+                    print("Let's reconfigure the tiers...")
+                    continue  # This will restart the tier selection process
+                else:
+                    print("Invalid input. Please enter 'yes' or 'no'.")
+            break
+        else:
+            print("Invalid input. Please enter 'yes' or 'no'.")
+    
+    return True
+
 # --- New Configuration Function ---
 def configure_script_settings():
-    global auto_buff_management, initial_torstol_wait, initial_attraction_wait, initial_powerburst_wait
+    global enable_torstol_sticks, enable_attraction_potion, enable_powerburst, enable_superheat_form
+    global initial_torstol_wait, initial_attraction_wait, initial_powerburst_wait, initial_superheat_form_wait
+    global heating_method, forge_heating_duration
 
     print("\n--- Script Configuration ---")
+    
+    # 1. Configure metal tiers first
+    if not configure_metal_tiers():
+        return False
 
-    # 1. Ask about Auto Buff Management
+    # 2. Configure heating method
+    print("\n--- Heating Method Configuration ---")
+    print("Choose how to reheat items during smithing:")
+    print("1. Superheat Item spell (current method)")
+    print("2. Forge reheating (click forge to reheat)")
+    
     while True:
-        choice = input("Enable automatic buff management (Torstol Sticks, Attraction Potion & Powerburst)? (yes/no) [yes]: ").lower().strip()
-        if choice in ['yes', 'y', '']:
-            auto_buff_management = True
-            print("Automatic buff management ENABLED.")
+        heating_choice = input("Select heating method (1/2) [1]: ").strip()
+        if heating_choice in ['', '1']:
+            heating_method = "superheat_spell"
+            print("Using Superheat Item spell for reheating.")
             break
-        elif choice in ['no', 'n']:
-            auto_buff_management = False
-            print("Automatic buff management DISABLED.")
-            return True # Configuration successful (even if buffs disabled)
+        elif heating_choice == '2':
+            heating_method = "forge"
+            print("Using forge for reheating.")
+            
+            # Ask for forge heating duration
+            while True:
+                try:
+                    duration_str = input("Enter forge heating duration in seconds [3.0]: ").strip()
+                    if not duration_str:
+                        forge_heating_duration = 3.0
+                        break
+                    duration = float(duration_str)
+                    if duration > 0:
+                        forge_heating_duration = duration
+                        print(f"Forge heating duration set to {forge_heating_duration} seconds.")
+                        break
+                    else:
+                        print("Duration must be positive.")
+                except ValueError:
+                    print("Invalid input. Please enter a number.")
+            break
+        else:
+            print("Invalid choice. Please enter 1 or 2.")
+
+    # 3. Configure individual buffs
+    print("\n--- Individual Buff Configuration ---")
+    print("Configure each buff independently:")
+    
+    # Torstol Sticks
+    while True:
+        choice = input("Enable Torstol Incense Sticks? (yes/no) [no]: ").lower().strip()
+        if choice in ['yes', 'y']:
+            enable_torstol_sticks = True
+            print("Torstol Incense Sticks ENABLED.")
+            break
+        elif choice in ['no', 'n', '']:
+            enable_torstol_sticks = False
+            print("Torstol Incense Sticks DISABLED.")
+            break
+        else:
+            print("Invalid input. Please enter 'yes' or 'no'.")
+    
+    # Attraction Potion
+    while True:
+        choice = input("Enable Attraction Potion? (yes/no) [no]: ").lower().strip()
+        if choice in ['yes', 'y']:
+            enable_attraction_potion = True
+            print("Attraction Potion ENABLED.")
+            break
+        elif choice in ['no', 'n', '']:
+            enable_attraction_potion = False
+            print("Attraction Potion DISABLED.")
+            break
+        else:
+            print("Invalid input. Please enter 'yes' or 'no'.")
+    
+    # Powerburst
+    while True:
+        choice = input("Enable Powerburst? (yes/no) [no]: ").lower().strip()
+        if choice in ['yes', 'y']:
+            enable_powerburst = True
+            print("Powerburst ENABLED.")
+            break
+        elif choice in ['no', 'n', '']:
+            enable_powerburst = False
+            print("Powerburst DISABLED.")
+            break
+        else:
+            print("Invalid input. Please enter 'yes' or 'no'.")
+    
+    # Superheat Form
+    while True:
+        choice = input("Enable Superheat Form prayer? (yes/no) [no]: ").lower().strip()
+        if choice in ['yes', 'y']:
+            enable_superheat_form = True
+            print("Superheat Form prayer ENABLED.")
+            break
+        elif choice in ['no', 'n', '']:
+            enable_superheat_form = False
+            print("Superheat Form prayer DISABLED.")
+            break
         else:
             print("Invalid input. Please enter 'yes' or 'no'.")
 
-    # 2. If enabled, ask about initial durations
-    if auto_buff_management:
+    # 4. Configure initial durations for enabled buffs
+    any_buffs_enabled = enable_torstol_sticks or enable_attraction_potion or enable_powerburst or enable_superheat_form
+    
+    if any_buffs_enabled:
         print("\nBuff Duration Input (optional):")
         print("If buffs are already active, enter their approximate remaining time in MINUTES.")
         print("Leave blank or enter 0 if they are not active or you want immediate activation.")
 
         # Torstol
-        while True:
-            try:
-                duration_str = input("  - Remaining Torstol Stick duration (minutes)? ").strip()
-                if not duration_str:
-                    initial_torstol_wait = 0
-                    break
-                duration_min = float(duration_str)
-                if duration_min >= 0:
-                    initial_torstol_wait = int(duration_min * 60) # Convert to seconds
-                    print(f"    -> Will wait {initial_torstol_wait} seconds before first Torstol activation.")
-                    break
-                else:
-                    print("Duration cannot be negative.")
-            except ValueError:
-                print("Invalid input. Please enter a number (e.g., 5.5 or 0).")
+        if enable_torstol_sticks:
+            while True:
+                try:
+                    duration_str = input("  - Remaining Torstol Stick duration (minutes)? ").strip()
+                    if not duration_str:
+                        initial_torstol_wait = 0
+                        break
+                    duration_min = float(duration_str)
+                    if duration_min >= 0:
+                        initial_torstol_wait = int(duration_min * 60) # Convert to seconds
+                        print(f"    -> Will wait {initial_torstol_wait} seconds before first Torstol activation.")
+                        break
+                    else:
+                        print("Duration cannot be negative.")
+                except ValueError:
+                    print("Invalid input. Please enter a number (e.g., 5.5 or 0).")
 
         # Attraction Potion
-        while True:
-            try:
-                duration_str = input("  - Remaining Attraction Potion duration (minutes)? ").strip()
-                if not duration_str:
-                    initial_attraction_wait = 0
-                    break
-                duration_min = float(duration_str)
-                if duration_min >= 0:
-                    initial_attraction_wait = int(duration_min * 60) # Convert to seconds
-                    print(f"    -> Will wait {initial_attraction_wait} seconds before first Attraction activation.")
-                    break
-                else:
-                    print("Duration cannot be negative.")
-            except ValueError:
-                print("Invalid input. Please enter a number (e.g., 12 or 0).")
+        if enable_attraction_potion:
+            while True:
+                try:
+                    duration_str = input("  - Remaining Attraction Potion duration (minutes)? ").strip()
+                    if not duration_str:
+                        initial_attraction_wait = 0
+                        break
+                    duration_min = float(duration_str)
+                    if duration_min >= 0:
+                        initial_attraction_wait = int(duration_min * 60) # Convert to seconds
+                        print(f"    -> Will wait {initial_attraction_wait} seconds before first Attraction activation.")
+                        break
+                    else:
+                        print("Duration cannot be negative.")
+                except ValueError:
+                    print("Invalid input. Please enter a number (e.g., 12 or 0).")
 
         # Powerburst
-        while True:
-            try:
-                duration_str = input("  - Remaining Powerburst duration (minutes)? ").strip()
-                if not duration_str:
-                    initial_powerburst_wait = 0
-                    break
-                duration_min = float(duration_str)
-                if duration_min >= 0:
-                    initial_powerburst_wait = int(duration_min * 60) # Convert to seconds
-                    print(f"    -> Will wait {initial_powerburst_wait} seconds before first Powerburst activation.")
-                    break
-                else:
-                    print("Duration cannot be negative.")
-            except ValueError:
-                print("Invalid input. Please enter a number (e.g., 1.5 or 0).")
+        if enable_powerburst:
+            while True:
+                try:
+                    duration_str = input("  - Remaining Powerburst duration (minutes)? ").strip()
+                    if not duration_str:
+                        initial_powerburst_wait = 0
+                        break
+                    duration_min = float(duration_str)
+                    if duration_min >= 0:
+                        initial_powerburst_wait = int(duration_min * 60) # Convert to seconds
+                        print(f"    -> Will wait {initial_powerburst_wait} seconds before first Powerburst activation.")
+                        break
+                    else:
+                        print("Duration cannot be negative.")
+                except ValueError:
+                    print("Invalid input. Please enter a number (e.g., 1.5 or 0).")
 
+        # Superheat Form
+        if enable_superheat_form:
+            while True:
+                try:
+                    duration_str = input("  - Remaining Superheat Form duration (minutes)? ").strip()
+                    if not duration_str:
+                        initial_superheat_form_wait = 0
+                        break
+                    duration_min = float(duration_str)
+                    if duration_min >= 0:
+                        initial_superheat_form_wait = int(duration_min * 60) # Convert to seconds
+                        print(f"    -> Will wait {initial_superheat_form_wait} seconds before first Superheat Form activation.")
+                        break
+                    else:
+                        print("Duration cannot be negative.")
+                except ValueError:
+                    print("Invalid input. Please enter a number (e.g., 10 or 0).")
+
+    # 5. Save all configuration settings to config.json
+    print("\n--- Saving Configuration ---")
+    
+    # Read existing config file directly without updating global variables
+    abs_config_file = os.path.abspath(config_file)
+    config_data = {"rois": {}, "keybinds": {}, "tiers": all_possible_tiers.copy()}
+    
+    if os.path.exists(abs_config_file):
+        try:
+            with open(abs_config_file, 'r') as f:
+                config_data = json.load(f)
+        except (json.JSONDecodeError, Exception) as e:
+            print(f"Warning: Could not load existing config: {e}. Using defaults.")
+    
+    # Update heating method configuration with current session values
+    if 'heating_method' not in config_data:
+        config_data['heating_method'] = {}
+    config_data['heating_method']['method'] = heating_method
+    config_data['heating_method']['forge_heating_duration'] = forge_heating_duration
+    
+    # Update buff configuration with current session values
+    if 'buffs' not in config_data:
+        config_data['buffs'] = {}
+    config_data['buffs']['enable_torstol_sticks'] = enable_torstol_sticks
+    config_data['buffs']['enable_attraction_potion'] = enable_attraction_potion
+    config_data['buffs']['enable_powerburst'] = enable_powerburst
+    config_data['buffs']['enable_superheat_form'] = enable_superheat_form
+    
+    # Update initial durations with current session values
+    if 'initial_durations' not in config_data['buffs']:
+        config_data['buffs']['initial_durations'] = {}
+    config_data['buffs']['initial_durations']['torstol_wait'] = initial_torstol_wait
+    config_data['buffs']['initial_durations']['attraction_wait'] = initial_attraction_wait
+    config_data['buffs']['initial_durations']['powerburst_wait'] = initial_powerburst_wait
+    config_data['buffs']['initial_durations']['superheat_form_wait'] = initial_superheat_form_wait
+    
+    # Save the updated configuration
+    save_config(config_data)
+    print("Configuration saved successfully!")
+    print(f"Heating method saved as: {heating_method}")
+    if heating_method == "forge":
+        print(f"Forge heating duration saved as: {forge_heating_duration} seconds")
+    
     print("---------------------------\n")
     return True # Configuration successful
 # --- End New Configuration Function ---
@@ -818,9 +1177,9 @@ def configure_script_settings():
 
 # --- Background Task Functions ---
 def torstol_task(target_window_id):
-    global script_running, script_paused, auto_buff_management, initial_torstol_wait, last_torstol_activation_time
-    if not auto_buff_management:
-        print("Torstol task skipped (auto-management disabled).")
+    global script_running, script_paused, enable_torstol_sticks, initial_torstol_wait, last_torstol_activation_time
+    if not enable_torstol_sticks:
+        print("Torstol task skipped (disabled in configuration).")
         return
 
     interactor_instance = X11WindowInteractor(window_id=target_window_id)
@@ -900,9 +1259,9 @@ def torstol_task(target_window_id):
 
 
 def attraction_task(target_window_id):
-    global script_running, script_paused, auto_buff_management, initial_attraction_wait, last_attraction_activation_time
-    if not auto_buff_management:
-        print("Attraction task skipped (auto-management disabled).")
+    global script_running, script_paused, enable_attraction_potion, initial_attraction_wait, last_attraction_activation_time
+    if not enable_attraction_potion:
+        print("Attraction task skipped (disabled in configuration).")
         return
 
     interactor_instance = X11WindowInteractor(window_id=target_window_id)
@@ -982,9 +1341,9 @@ def attraction_task(target_window_id):
 
 
 def powerburst_task(target_window_id):
-    global script_running, script_paused, auto_buff_management, initial_powerburst_wait, last_powerburst_activation_time, in_smithing_loop
-    if not auto_buff_management:
-        print("Powerburst task skipped (auto-management disabled).")
+    global script_running, script_paused, enable_powerburst, initial_powerburst_wait, last_powerburst_activation_time, in_smithing_loop
+    if not enable_powerburst:
+        print("Powerburst task skipped (disabled in configuration).")
         return
 
     interactor_instance = X11WindowInteractor(window_id=target_window_id)
@@ -1054,71 +1413,157 @@ def powerburst_task(target_window_id):
             if not interruptible_sleep(5): return  # Use interruptible sleep in except block
 
     print("Powerburst thread finished.")
+
+
+def superheat_form_task(target_window_id):
+    """Background task to maintain Superheat Form prayer if enabled."""
+    global script_running, script_paused, enable_superheat_form, initial_superheat_form_wait, last_superheat_form_activation_time
+    if not enable_superheat_form:
+        print("Superheat Form task skipped (disabled in configuration).")
+        return
+
+    interactor_instance = X11WindowInteractor(window_id=target_window_id)
+    print(f"Superheat Form thread started (Interactor for window: {target_window_id}).")
+
+    target_expiry_time = 0
+    next_interval = random.uniform(295, 305)  # ~5 minutes (300 seconds)
+
+    # Calculate initial target expiry time
+    if initial_superheat_form_wait > 0:
+        target_expiry_time = time.time() + initial_superheat_form_wait
+        print(f"Superheat Form: Initial wait set. Next check/activation around {time.strftime('%H:%M:%S', time.localtime(target_expiry_time))}")
+    else:
+        # Activate immediately if script is running and not paused
+        if script_running and not script_paused:
+            print("Activating Initial Superheat Form...")
+            interactor_instance.send_key(superheat_form)
+            last_superheat_form_activation_time = time.time()
+            # Use interruptible_sleep after activation
+            if not interruptible_sleep(random.uniform(0.6, 0.8)): return
+            target_expiry_time = last_superheat_form_activation_time + next_interval
+            print(f"Superheat Form: Initial activation done. Next activation around {time.strftime('%H:%M:%S', time.localtime(target_expiry_time))}")
+        elif script_running: # Started paused
+             last_superheat_form_activation_time = time.time() # Pretend it just activated
+             target_expiry_time = last_superheat_form_activation_time + next_interval
+             print(f"Superheat Form: Script started paused. Scheduling first activation around {time.strftime('%H:%M:%S', time.localtime(target_expiry_time))}")
+        else:
+             return # Script stopped before initial activation
+
+    while script_running:
+        try:
+            # --- Main Sleep Loop using interruptible_sleep ---
+            now = time.time()
+            while now < target_expiry_time:
+                if not script_running:
+                    print("Superheat Form thread stopping during wait.")
+                    return
+
+                # Calculate remaining time until expiry
+                remaining = target_expiry_time - now
+                # Sleep for a short interval or until expiry, whichever is less
+                sleep_duration = min(0.2, remaining)
+
+                # Use interruptible_sleep for the main wait interval
+                if not interruptible_sleep(sleep_duration):
+                    # If sleep was interrupted by stop signal, exit
+                    return
+
+                # Update 'now' after sleeping
+                now = time.time()
+            # --- End Main Sleep Loop ---
+
+            # Time is up, activate if still running (pause is handled by interruptible_sleep)
+            if script_running:
+                print("Activating Superheat Form...")
+                interactor_instance.send_key(superheat_form)
+                last_superheat_form_activation_time = time.time()
+                # Use interruptible_sleep after activation
+                if not interruptible_sleep(random.uniform(0.6, 0.8)): return
+
+                # Calculate NEXT target expiry time
+                next_interval = random.uniform(295, 305)  # ~5 minutes
+                target_expiry_time = last_superheat_form_activation_time + next_interval
+                print(f"Superheat Form: Next activation scheduled around {time.strftime('%H:%M:%S', time.localtime(target_expiry_time))}")
+            else:
+                 print("Superheat Form thread stopping before activation.")
+                 return # Script stopped
+
+        except Exception as e:
+            print(f"Error in superheat_form_task: {e}")
+            print("Waiting before retrying loop...")
+            # Use interruptible sleep for the error wait
+            if not interruptible_sleep(5): return
+
+    print("Superheat Form thread finished.")
 # --- End Background Task Functions ---
 
 
 def main_script(target_window_id):
-    global script_running, script_paused, crafting_queue
+    global script_running, script_paused, crafting_queue, enable_superheat_form
     interactor_instance = X11WindowInteractor(window_id=target_window_id)
     print(f"Main script thread started (Interactor for window: {target_window_id}).")
 
-    print("Activating window and ensuring Superheat Form is active...")
+    print("Activating window...")
     interactor_instance.activate()
     if not interruptible_sleep(0.5): return # Small delay after activation
 
-    # --- Robust Superheat Form Check/Activation (using interruptible_sleep) ---
-    max_retries = 3
-    superheat_active = False
-    for attempt in range(max_retries):
-        if not script_running: return # Stop if script was stopped externally
-        print(f"Superheat Form check (Attempt {attempt + 1}/{max_retries})...")
-        try:
-            buff_img = interactor_instance.capture(rois["buff"])
-            if buff_img is None:
-                print("Error capturing buff ROI. Retrying...")
-                if not interruptible_sleep(1.5): return # Use interruptible sleep
-                continue
+    # --- Conditional Superheat Form Check/Activation ---
+    if enable_superheat_form:
+        print("Superheat Form is enabled. Checking and ensuring it's active...")
+        max_retries = 3
+        superheat_active = False
+        for attempt in range(max_retries):
+            if not script_running: return # Stop if script was stopped externally
+            print(f"Superheat Form check (Attempt {attempt + 1}/{max_retries})...")
+            try:
+                buff_img = interactor_instance.capture(rois["buff"])
+                if buff_img is None:
+                    print("Error capturing buff ROI. Retrying...")
+                    if not interruptible_sleep(1.5): return # Use interruptible sleep
+                    continue
 
-            _, _, _, _, status = find_image(superheat_form_img, buff_img, lineant_matcher)
+                _, _, _, _, status = find_image(superheat_form_img, buff_img, lineant_matcher)
 
-            if status == 'Detected':
-                print("Superheat Form detected.")
-                superheat_active = True
-                break # Exit loop, buff is active
-            else:
-                print("Superheat Form not detected. Attempting activation...")
-                interactor_instance.send_key(superheat_form)
-                if not interruptible_sleep(random.uniform(2.0, 2.5)): return # Use interruptible sleep
-
-                # Re-check after activation attempt
-                buff_img_after = interactor_instance.capture(rois["buff"])
-                if buff_img_after is None:
-                     print("Error capturing buff ROI after activation attempt. Retrying check...")
-                     if not interruptible_sleep(1.5): return # Use interruptible sleep
-                     continue
-
-                _, _, _, _, status_after = find_image(superheat_form_img, buff_img_after, lineant_matcher)
-                if status_after == 'Detected':
-                     print("Superheat Form activated successfully.")
-                     superheat_active = True
-                     break # Exit loop, buff is now active
+                if status == 'Detected':
+                    print("Superheat Form detected.")
+                    superheat_active = True
+                    break # Exit loop, buff is active
                 else:
-                    print("Superheat Form still not detected after activation attempt.")
-                    # Loop will continue for next retry
+                    print("Superheat Form not detected. Attempting activation...")
+                    interactor_instance.send_key(superheat_form)
+                    if not interruptible_sleep(random.uniform(2.0, 2.5)): return # Use interruptible sleep
 
-        except Exception as e:
-            print(f"Error during Superheat Form check/activation: {e}. Retrying...")
-            if not interruptible_sleep(2.0): return # Use interruptible sleep
+                    # Re-check after activation attempt
+                    buff_img_after = interactor_instance.capture(rois["buff"])
+                    if buff_img_after is None:
+                         print("Error capturing buff ROI after activation attempt. Retrying check...")
+                         if not interruptible_sleep(1.5): return # Use interruptible sleep
+                         continue
 
-        if not superheat_active and attempt < max_retries - 1:
-            print("Waiting before next check...")
-            if not interruptible_sleep(random.uniform(2.0, 3.0)): return # Use interruptible sleep
+                    _, _, _, _, status_after = find_image(superheat_form_img, buff_img_after, lineant_matcher)
+                    if status_after == 'Detected':
+                         print("Superheat Form activated successfully.")
+                         superheat_active = True
+                         break # Exit loop, buff is now active
+                    else:
+                        print("Superheat Form still not detected after activation attempt.")
+                        # Loop will continue for next retry
 
-    if not superheat_active:
-        print("Failed to activate or verify Superheat Form after multiple attempts. Stopping script.")
-        script_running = False # Ensure other loops stop
-        return # Stop main_script execution
-    # --- End Superheat Form Check ---
+            except Exception as e:
+                print(f"Error during Superheat Form check/activation: {e}. Retrying...")
+                if not interruptible_sleep(2.0): return # Use interruptible sleep
+
+            if not superheat_active and attempt < max_retries - 1:
+                print("Waiting before next check...")
+                if not interruptible_sleep(random.uniform(2.0, 3.0)): return # Use interruptible sleep
+
+        if not superheat_active:
+            print("Failed to activate or verify Superheat Form after multiple attempts. Stopping script.")
+            script_running = False # Ensure other loops stop
+            return # Stop main_script execution
+    else:
+        print("Superheat Form is disabled. Skipping superheat form check.")
+    # --- End Conditional Superheat Form Check ---
 
 
     print("Processing queue...")
@@ -1175,7 +1620,8 @@ def main_script(target_window_id):
 
 
 def on_press(key):
-    global script_running, script_paused, interactor, auto_buff_management
+    global script_running, script_paused, interactor
+    global enable_torstol_sticks, enable_attraction_potion, enable_powerburst, enable_superheat_form
     try:
         # Check for F11, F12, and F10 keys
         if key == pkeyboard.Key.f11:  # F11 key to start/pause
@@ -1211,13 +1657,27 @@ def on_press(key):
                 # Start main crafting thread
                 threading.Thread(target=main_script, args=(target_window_id,), daemon=True).start()
 
-                # Start buff threads only if enabled
-                if auto_buff_management:
+                # Start individual buff threads based on enable flags
+                if enable_torstol_sticks:
                     threading.Thread(target=torstol_task, args=(target_window_id,), daemon=True).start()
+                if enable_attraction_potion:
                     threading.Thread(target=attraction_task, args=(target_window_id,), daemon=True).start()
+                if enable_powerburst:
                     threading.Thread(target=powerburst_task, args=(target_window_id,), daemon=True).start()
+                if enable_superheat_form:
+                    threading.Thread(target=superheat_form_task, args=(target_window_id,), daemon=True).start()
+                
+                # Show which buffs are enabled
+                enabled_buffs = []
+                if enable_torstol_sticks: enabled_buffs.append("Torstol Sticks")
+                if enable_attraction_potion: enabled_buffs.append("Attraction Potion")
+                if enable_powerburst: enabled_buffs.append("Powerburst")
+                if enable_superheat_form: enabled_buffs.append("Superheat Form")
+                
+                if enabled_buffs:
+                    print(f"Started buff threads for: {', '.join(enabled_buffs)}")
                 else:
-                    print("Skipping buff management threads as they are disabled.")
+                    print("No buff threads started (all buffs disabled).")
 
             else:
                 # --- Pause/Resume Logic ---

@@ -1,0 +1,137 @@
+{
+    "rois": {
+        "forge": [
+            763,
+            57,
+            188,
+            237
+        ],
+        "anvil": [
+            1013,
+            399,
+            89,
+            73
+        ],
+        "metal_bar": [
+            634,
+            416,
+            34,
+            34
+        ],
+        "metal_full_helm": [
+            831,
+            366,
+            34,
+            34
+        ],
+        "metal_platelegs": [
+            933,
+            367,
+            33,
+            32
+        ],
+        "metal_platebody": [
+            829,
+            417,
+            38,
+            34
+        ],
+        "metal_boots": [
+            832,
+            470,
+            33,
+            30
+        ],
+        "metal_gauntlets": [
+            884,
+            469,
+            32,
+            30
+        ],
+        "base": [
+            1072,
+            380,
+            44,
+            17
+        ],
+        "plus_1": [
+            1127,
+            381,
+            21,
+            16
+        ],
+        "plus_2": [
+            1158,
+            381,
+            25,
+            16
+        ],
+        "plus_3": [
+            1192,
+            381,
+            23,
+            16
+        ],
+        "plus_4": [
+            1223,
+            381,
+            18,
+            16
+        ],
+        "plus_5": [
+            1252,
+            382,
+            23,
+            15
+        ],
+        "burial": [
+            1296,
+            382,
+            41,
+            14
+        ],
+        "bagpack": [
+            1250,
+            895,
+            286,
+            147
+        ],
+        "buff": [
+            967,
+            764,
+            264,
+            87
+        ]
+    },
+    "keybinds": {
+        "superheat_spell": "V",
+        "torstol_sticks": "X",
+        "attraction_potion": "Z",
+        "powerburst": "G",
+        "superheat_form": "C",
+        "start_smithing": "space"
+    },
+    "tiers": [
+        "base",
+        "plus_1",
+        "plus_2",
+        "plus_3",
+        "burial"
+    ],
+    "heating_method": {
+        "method": "forge",
+        "forge_heating_duration": 3.0
+    },
+    "buffs": {
+        "enable_torstol_sticks": false,
+        "enable_attraction_potion": false,
+        "enable_powerburst": false,
+        "enable_superheat_form": false,
+        "initial_durations": {
+            "torstol_wait": 0,
+            "attraction_wait": 0,
+            "powerburst_wait": 0,
+            "superheat_form_wait": 0
+        }
+    }
+}
