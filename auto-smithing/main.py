@@ -101,20 +101,34 @@ available_items = [
     "metal_full_helm", "metal_platelegs", "metal_platebody",
     "metal_boots", "metal_gauntlets"
 ]
+# Custom items storage - format: {"custom_item_1": "User Display Name"}
+custom_items = {}
+
 # Default tier progression (can be customized during configuration)
 all_possible_tiers = [
-    "base", "plus_1", "plus_2", "plus_3", "plus_4", "plus_5", "burial"
+    "tierless", "base", "plus_1", "plus_2", "plus_3", "plus_4", "plus_5", "burial"
 ]
 # Active tiers for current metal type (configured during startup)
 ordered_tiers = all_possible_tiers.copy()  # Default to all tiers
 crafting_queue = deque()
+
+# Helper function to get all available items (predefined + custom)
+def get_all_available_items():
+    """Returns combined list of predefined and custom items"""
+    return available_items + list(custom_items.keys())
+
+def get_item_display_name(item_key):
+    """Returns display name for an item (custom name or original key)"""
+    if item_key in custom_items:
+        return custom_items[item_key]
+    return item_key.replace('_', ' ').title()
 # --- End New Data Structures ---
 
 
 # Configuration functions
 def load_config():
     """Load configuration from config.json if it exists."""
-    global ordered_tiers, heating_method, forge_heating_duration
+    global ordered_tiers, heating_method, forge_heating_duration, custom_items
     global enable_torstol_sticks, enable_attraction_potion, enable_powerburst, enable_superheat_form
     global initial_torstol_wait, initial_attraction_wait, initial_powerburst_wait, initial_superheat_form_wait
     
@@ -132,6 +146,14 @@ def load_config():
             if 'tiers' in config_data:
                 ordered_tiers = config_data['tiers']
                 print(f"Loaded tier configuration: {' → '.join(ordered_tiers)}")
+            
+            # Load custom items if available
+            if 'custom_items' in config_data:
+                custom_items = config_data['custom_items']
+                if custom_items:
+                    print(f"Loaded custom items: {', '.join([f'{key} ({name})' for key, name in custom_items.items()])}")
+                else:
+                    print("No custom items configured.")
             
             # Load heating method configuration if available
             if 'heating_method' in config_data:
@@ -182,6 +204,7 @@ def load_config():
                 "rois": {},
                 "keybinds": {},
                 "tiers": all_possible_tiers.copy(),
+                "custom_items": {},
                 "heating_method": {
                     "method": "superheat_spell",
                     "forge_heating_duration": 3.0
@@ -209,6 +232,7 @@ def load_config():
         "rois": {},
         "keybinds": {},
         "tiers": all_possible_tiers.copy(),
+        "custom_items": {},
         "heating_method": {"method": "superheat_spell", "forge_heating_duration": 3.0},
         "buffs": {
             "enable_torstol_sticks": False,
@@ -306,13 +330,18 @@ def get_smithing_configuration(window_id=None):
         print("You will be asked to select regions of interest (ROIs) for various elements.")
         print("For each element, you'll have time to prepare your game window before selection.")
 
-        # Define the ROIs to calibrate
+        # Define the ROIs to calibrate (predefined + custom items)
         roi_keys = [
             "forge", "anvil", "metal_bar", "metal_full_helm", "metal_platelegs",
             "metal_platebody", "metal_boots", "metal_gauntlets", "base",
             "plus_1", "plus_2", "plus_3", "plus_4", "plus_5", "burial",
             "bagpack", "buff"
         ]
+        
+        # Add custom item ROIs if any exist
+        if custom_items:
+            print(f"Adding {len(custom_items)} custom item ROIs to calibration list...")
+            roi_keys.extend(list(custom_items.keys()))
 
         # Initialize or reset config data
         if not config_data:
@@ -320,14 +349,22 @@ def get_smithing_configuration(window_id=None):
 
         # Calibrate each ROI
         for key in roi_keys:
+            # Show custom item display name for better user experience
+            display_name = get_item_display_name(key) if key in custom_items else key
+            if key in custom_items:
+                print(f"Calibrating custom item: {display_name}")
+            
             roi = calibrate(key, config_interactor, config_data)
             if roi is None:
                 print(f"Skipping {key} ROI configuration.")
-                # If a key ROI is missing, use default if available
-                default_roi_var = f"{key}_roi"
-                if default_roi_var in globals():
-                    config_data['rois'][key] = globals()[default_roi_var]
-                    print(f"Using default ROI for {key}: {globals()[default_roi_var]}")
+                # If a key ROI is missing, use default if available (only for predefined items)
+                if key not in custom_items:
+                    default_roi_var = f"{key}_roi"
+                    if default_roi_var in globals():
+                        config_data['rois'][key] = globals()[default_roi_var]
+                        print(f"Using default ROI for {key}: {globals()[default_roi_var]}")
+                else:
+                    print(f"Warning: Custom item '{display_name}' has no ROI configured. It may not work properly.")
 
             # Ask if user wants to continue to next ROI
             if key != roi_keys[-1]:  # If not the last ROI
@@ -550,11 +587,12 @@ def smith(item, tier, interactor_instance):
     interactor_instance.click(click_x, click_y) # Use passed interactor
     if not interruptible_sleep(random.uniform(1.2, 1.4)): return False
 
-    # Select Tier
-    x, y, w, h = rois[tier]
-    click_x, click_y = randomize_click_position(x, y, w, h, shape='rectangle', roi_diminish=2)
-    interactor_instance.click(click_x, click_y) # Use passed interactor
-    if not interruptible_sleep(random.uniform(1.2, 1.4)): return False
+    # Select Tier (skip for tierless items)
+    if tier != "tierless":
+        x, y, w, h = rois[tier]
+        click_x, click_y = randomize_click_position(x, y, w, h, shape='rectangle', roi_diminish=2)
+        interactor_instance.click(click_x, click_y) # Use passed interactor
+        if not interruptible_sleep(random.uniform(1.2, 1.4)): return False
 
     # Start Smithing Keys (quick actions, minimal sleep ok)
     interactor_instance.send_key(start_smithing)
@@ -675,17 +713,28 @@ def get_crafting_requests():
         while True:
             print("\n--- New Crafting Request ---")
             # Get Item
-            print("Available items:", ", ".join(available_items))
+            all_items = get_all_available_items()
+            print("Available items:")
+            for i, item_key in enumerate(all_items):
+                display_name = get_item_display_name(item_key)
+                print(f"  {i+1}: {item_key} ({display_name})")
+            
             item = input(f"Enter item to craft (or type 'done' to finish): ").lower().strip()
             if item == 'done':
                 break
-            if item not in available_items:
+            if item not in all_items:
                 print("Invalid item. Please choose from the list.")
                 continue
 
             # Get Target Tier
-            print("Available tiers:", ", ".join(ordered_tiers))
-            target_tier = input(f"Enter TARGET tier for {item}: ").lower().strip()
+            print("Available tiers:")
+            for i, tier in enumerate(ordered_tiers):
+                if tier == "tierless":
+                    print(f"  {i+1}: {tier} (no tier upgrade - craft as-is)")
+                else:
+                    print(f"  {i+1}: {tier}")
+            
+            target_tier = input(f"Enter TARGET tier for {get_item_display_name(item)}: ").lower().strip()
             if target_tier not in ordered_tiers:
                 print("Invalid tier. Please choose from the list.")
                 continue
@@ -706,40 +755,46 @@ def get_crafting_requests():
                     print("Invalid input. Please enter a number.")
 
             # Handle Recursive Crafting (Based on what tier user HAS)
-            have_tier = None # Default: User has nothing, start from base
-            is_recursive = False
-            target_tier_index = ordered_tiers.index(target_tier)
-            have_tier_index = -1 # Index of the tier the user HAS (-1 means none/base)
+            # Skip recursive logic for tierless items
+            if target_tier == "tierless":
+                # For tierless items, just add the single task
+                tasks_for_this_request = [(item, target_tier)]
+                print(f"  Added task: Craft {get_item_display_name(item)} - {target_tier}")
+            else:
+                have_tier = None # Default: User has nothing, start from base
+                is_recursive = False
+                target_tier_index = ordered_tiers.index(target_tier)
+                have_tier_index = -1 # Index of the tier the user HAS (-1 means none/base)
 
-            if target_tier_index > 0: # Only ask if target is not 'base'
-                recursive_choice = input(f"Is this a recursive craft (i.e., do you already have a lower tier of {item})? (yes/no, default: no): ").lower().strip()
-                if recursive_choice in ['yes', 'y']:
-                    is_recursive = True
-                    have_tier_choice = input(f"Which tier of {item} do you currently HAVE? (leave blank if none/base): ").lower().strip()
-                    if have_tier_choice == "":
-                        have_tier_index = -1 # Start from base implicitly
-                        print("Okay, will craft all tiers up to target.")
-                    elif have_tier_choice in ordered_tiers:
-                        temp_have_index = ordered_tiers.index(have_tier_choice)
-                        if temp_have_index >= target_tier_index:
-                             print(f"Have tier '{have_tier_choice}' cannot be the same or after target tier '{target_tier}'. Assuming you have none.")
-                             have_tier_index = -1
+                if target_tier_index > 1: # Only ask if target is not 'tierless' or 'base' (index > 1)
+                    recursive_choice = input(f"Is this a recursive craft (i.e., do you already have a lower tier of {get_item_display_name(item)})? (yes/no, default: no): ").lower().strip()
+                    if recursive_choice in ['yes', 'y']:
+                        is_recursive = True
+                        have_tier_choice = input(f"Which tier of {get_item_display_name(item)} do you currently HAVE? (leave blank if none/base): ").lower().strip()
+                        if have_tier_choice == "":
+                            have_tier_index = 0 # Start from base (index 1, since tierless is 0)
+                            print("Okay, will craft all tiers up to target.")
+                        elif have_tier_choice in ordered_tiers:
+                            temp_have_index = ordered_tiers.index(have_tier_choice)
+                            if temp_have_index >= target_tier_index:
+                                 print(f"Have tier '{have_tier_choice}' cannot be the same or after target tier '{target_tier}'. Assuming you have none.")
+                                 have_tier_index = 0 # Start from base
+                            else:
+                                 have_tier = have_tier_choice
+                                 have_tier_index = temp_have_index
+                                 print(f"Okay, will craft tiers from {ordered_tiers[have_tier_index + 1]} up to {target_tier}.")
                         else:
-                             have_tier = have_tier_choice
-                             have_tier_index = temp_have_index
-                             print(f"Okay, will craft tiers from {ordered_tiers[have_tier_index + 1]} up to {target_tier}.")
-                    else:
-                        print("Invalid have tier. Assuming you have none.")
-                        have_tier_index = -1
-                # No 'else' needed, is_recursive stays False if they say no or blank
+                            print("Invalid have tier. Assuming you have none.")
+                            have_tier_index = 0 # Start from base
+                    # No 'else' needed, is_recursive stays False if they say no or blank
 
-            # Build and add tasks to the main queue
-            tasks_for_this_request = []
-            start_crafting_index = have_tier_index + 1 # Craft the tier *after* the one they have
-            for i in range(start_crafting_index, target_tier_index + 1):
-                 current_tier_to_craft = ordered_tiers[i]
-                 tasks_for_this_request.append((item, current_tier_to_craft))
-                 print(f"  Added task step: Craft {item} - {current_tier_to_craft}")
+                # Build and add tasks to the main queue
+                tasks_for_this_request = []
+                start_crafting_index = max(1, have_tier_index + 1) # Start from base (index 1) at minimum
+                for i in range(start_crafting_index, target_tier_index + 1):
+                     current_tier_to_craft = ordered_tiers[i]
+                     tasks_for_this_request.append((item, current_tier_to_craft))
+                     print(f"  Added task step: Craft {get_item_display_name(item)} - {current_tier_to_craft}")
 
             # Add the sequence of tasks 'quantity' times
             for _ in range(quantity):
@@ -747,24 +802,30 @@ def get_crafting_requests():
                     crafting_queue.append(task)
                     total_tasks += 1
 
-            print(f"Added {quantity} x request(s) for {item} (up to {target_tier}) to the queue.")
+            print(f"Added {quantity} x request(s) for {get_item_display_name(item)} (up to {target_tier}) to the queue.")
         # --- End Interactive Mode ---
 
     elif input_mode == 'compact':
         # --- Compact Mode ---
         print("\n--- Compact Crafting Input ---")
+        all_items = get_all_available_items()
         print("Available Items:")
-        for i, item_name in enumerate(available_items):
-            print(f"  {i+1}: {item_name}")
+        for i, item_key in enumerate(all_items):
+            display_name = get_item_display_name(item_key)
+            print(f"  {i+1}: {item_key} ({display_name})")
         print(f"\nAvailable Tiers (configured for current metal):")
         for i, tier_name in enumerate(ordered_tiers):
-             print(f"  {i+1}: {tier_name}")
+            if tier_name == "tierless":
+                print(f"  {i+1}: {tier_name} (no tier upgrade - craft as-is)")
+            else:
+                print(f"  {i+1}: {tier_name}")
 
         print("\nEnter requests in the format: <item#> <target_tier#> [quantity] [h<have_tier#>]")
         print(f"Example: '1 {len(ordered_tiers)} 5 h2' -> 5x Item#1 to final tier, you HAVE Tier#2 from the list")
         print(f"Example: '2 {len(ordered_tiers)-1} 10' -> 10x Item#2 to second-to-last tier, you HAVE none (starts from base)")
-        print("Example: '3 3' -> 1x Item#3 to 3rd tier, you HAVE none")
+        print("Example: '3 1' -> 1x Item#3 tierless (no tier upgrade)")
         print("*** Important: Use the number from the tier list above for h<have_tier#>. 'h0' or omitting means you have none. ***")
+        print("*** Note: Tierless items ignore the 'h<have_tier#>' parameter. ***")
         print("Enter 'done' when finished.")
 
         while True:
@@ -789,8 +850,8 @@ def get_crafting_requests():
                 have_tier_num = int(match.group(4)) if match.group(4) else 0 # 0 means none/base
 
                 # Validate numbers
-                if not (1 <= item_num <= len(available_items)):
-                    print(f"Invalid item number. Must be between 1 and {len(available_items)}.")
+                if not (1 <= item_num <= len(all_items)):
+                    print(f"Invalid item number. Must be between 1 and {len(all_items)}.")
                     continue
                 if not (1 <= target_tier_num <= len(ordered_tiers)):
                     print(f"Invalid target tier number. Must be between 1 and {len(ordered_tiers)}.")
@@ -802,24 +863,29 @@ def get_crafting_requests():
                      print(f"Invalid have tier number. Must be 0 (none/omitted) or between 1 and {len(ordered_tiers)}.")
                      continue
 
-
                 item_index = item_num - 1
                 target_tier_index = target_tier_num - 1
                 have_tier_index = have_tier_num - 1 if have_tier_num > 0 else -1 # -1 for none/base
 
-                item = available_items[item_index]
+                item = all_items[item_index]
                 target_tier = ordered_tiers[target_tier_index]
 
-                if have_tier_index >= target_tier_index:
-                     print(f"Error: Have tier ({ordered_tiers[have_tier_index]}) cannot be same or after target tier ({target_tier}).")
-                     continue
+                # Handle tierless items
+                if target_tier == "tierless":
+                    # For tierless items, ignore have_tier and just add the single task
+                    tasks_for_this_request = [(item, target_tier)]
+                else:
+                    # Regular tiered logic
+                    if have_tier_index >= target_tier_index:
+                         print(f"Error: Have tier ({ordered_tiers[have_tier_index]}) cannot be same or after target tier ({target_tier}).")
+                         continue
 
-                # Build and add tasks
-                tasks_for_this_request = []
-                start_crafting_index = have_tier_index + 1
-                for i in range(start_crafting_index, target_tier_index + 1):
-                    current_tier_to_craft = ordered_tiers[i]
-                    tasks_for_this_request.append((item, current_tier_to_craft))
+                    # Build and add tasks
+                    tasks_for_this_request = []
+                    start_crafting_index = max(1, have_tier_index + 1) # Start from base (index 1) at minimum
+                    for i in range(start_crafting_index, target_tier_index + 1):
+                        current_tier_to_craft = ordered_tiers[i]
+                        tasks_for_this_request.append((item, current_tier_to_craft))
 
                 # Add the sequence 'quantity' times
                 for _ in range(quantity):
@@ -827,8 +893,11 @@ def get_crafting_requests():
                         crafting_queue.append(task)
                         total_tasks += 1
 
-                have_tier_str = f", have {ordered_tiers[have_tier_index]}" if have_tier_index != -1 else ", have none"
-                print(f"  Added {quantity}x {item} up to {target_tier}{have_tier_str}. Steps: {[t[1] for t in tasks_for_this_request]}")
+                if target_tier == "tierless":
+                    print(f"  Added {quantity}x {get_item_display_name(item)} - {target_tier}")
+                else:
+                    have_tier_str = f", have {ordered_tiers[have_tier_index]}" if have_tier_index != -1 else ", have none"
+                    print(f"  Added {quantity}x {get_item_display_name(item)} up to {target_tier}{have_tier_str}. Steps: {[t[1] for t in tasks_for_this_request]}")
 
 
             except (ValueError, IndexError) as e:
@@ -855,6 +924,81 @@ def get_crafting_requests():
     print("------------------------------")
     return total_tasks > 0
 # --- End New Input and Queue Logic ---
+
+# --- Custom Items Configuration Function ---
+def configure_custom_items():
+    """Configure custom items that users can add."""
+    global custom_items
+    
+    print("\n--- Custom Items Configuration ---")
+    print("You can add custom items beyond the predefined ones (helm, platelegs, platebody, boots, gauntlets).")
+    print("Each custom item will need its own ROI calibration.")
+    
+    # Load existing custom items
+    config_data = load_config()
+    if 'custom_items' in config_data and config_data['custom_items']:
+        print(f"\nExisting custom items:")
+        for key, name in config_data['custom_items'].items():
+            print(f"  - {key}: {name}")
+        
+        while True:
+            choice = input("Do you want to modify existing custom items? (yes/no) [no]: ").lower().strip()
+            if choice in ['yes', 'y']:
+                break
+            elif choice in ['no', 'n', '']:
+                custom_items = config_data['custom_items'].copy()
+                print("Using existing custom items.")
+                return True
+            else:
+                print("Invalid input. Please enter 'yes' or 'no'.")
+    
+    # Ask if user wants to add custom items
+    while True:
+        choice = input("Do you want to add custom items? (yes/no) [no]: ").lower().strip()
+        if choice in ['no', 'n', '']:
+            print("No custom items will be added.")
+            return True
+        elif choice in ['yes', 'y']:
+            break
+        else:
+            print("Invalid input. Please enter 'yes' or 'no'.")
+    
+    # Add custom items
+    custom_item_counter = 1
+    while True:
+        print(f"\n--- Adding Custom Item #{custom_item_counter} ---")
+        
+        # Get custom item name
+        while True:
+            item_name = input(f"Enter display name for custom item #{custom_item_counter} (or 'done' to finish): ").strip()
+            if item_name.lower() == 'done':
+                if custom_item_counter == 1:
+                    print("No custom items added.")
+                return True
+            
+            if item_name and len(item_name) <= 50:  # Reasonable length limit
+                break
+            else:
+                print("Please enter a valid name (1-50 characters).")
+        
+        # Generate unique key
+        item_key = f"custom_item_{custom_item_counter}"
+        
+        # Store the custom item
+        custom_items[item_key] = item_name
+        print(f"Added custom item: {item_key} -> '{item_name}'")
+        
+        # Ask if user wants to add more
+        while True:
+            more_choice = input("Add another custom item? (yes/no) [no]: ").lower().strip()
+            if more_choice in ['no', 'n', '']:
+                print(f"Custom items configuration complete. Added {len(custom_items)} custom items.")
+                return True
+            elif more_choice in ['yes', 'y']:
+                custom_item_counter += 1
+                break
+            else:
+                print("Invalid input. Please enter 'yes' or 'no'.")
 
 # --- Tier Configuration Function ---
 def configure_metal_tiers():
@@ -947,11 +1091,15 @@ def configure_script_settings():
 
     print("\n--- Script Configuration ---")
     
-    # 1. Configure metal tiers first
+    # 1. Configure custom items first
+    if not configure_custom_items():
+        return False
+    
+    # 2. Configure metal tiers
     if not configure_metal_tiers():
         return False
 
-    # 2. Configure heating method
+    # 3. Configure heating method
     print("\n--- Heating Method Configuration ---")
     print("Choose how to reheat items during smithing:")
     print("1. Superheat Item spell (current method)")
@@ -987,7 +1135,7 @@ def configure_script_settings():
         else:
             print("Invalid choice. Please enter 1 or 2.")
 
-    # 3. Configure individual buffs
+    # 4. Configure individual buffs
     print("\n--- Individual Buff Configuration ---")
     print("Configure each buff independently:")
     
@@ -1047,7 +1195,7 @@ def configure_script_settings():
         else:
             print("Invalid input. Please enter 'yes' or 'no'.")
 
-    # 4. Configure initial durations for enabled buffs
+    # 5. Configure initial durations for enabled buffs
     any_buffs_enabled = enable_torstol_sticks or enable_attraction_potion or enable_powerburst or enable_superheat_form
     
     if any_buffs_enabled:
@@ -1127,7 +1275,7 @@ def configure_script_settings():
                 except ValueError:
                     print("Invalid input. Please enter a number (e.g., 10 or 0).")
 
-    # 5. Save all configuration settings to config.json
+    # 6. Save all configuration settings to config.json
     print("\n--- Saving Configuration ---")
     
     # Read existing config file directly without updating global variables
@@ -1162,6 +1310,9 @@ def configure_script_settings():
     config_data['buffs']['initial_durations']['attraction_wait'] = initial_attraction_wait
     config_data['buffs']['initial_durations']['powerburst_wait'] = initial_powerburst_wait
     config_data['buffs']['initial_durations']['superheat_form_wait'] = initial_superheat_form_wait
+    
+    # Update custom items configuration with current session values
+    config_data['custom_items'] = custom_items.copy()
     
     # Save the updated configuration
     save_config(config_data)
