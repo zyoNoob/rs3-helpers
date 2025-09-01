@@ -492,6 +492,45 @@ def get_ocr_configuration(window_id=None):
                 except ValueError:
                     print("Invalid input. Please enter a number.")
 
+            # Get recovery mechanism configuration
+            print("\nRecovery Mechanism Configuration:")
+            print("The recovery mechanism can automatically trigger actions if OCR conditions")
+            print("are not detected within expected timeframes based on previous activation patterns.")
+            
+            # Get recovery enabled setting
+            while True:
+                recovery_choice = safe_input("Enable recovery mechanism? (yes/no) [yes]: ").lower().strip()
+                if recovery_choice in ['yes', 'y', '']:
+                    recovery_enabled = True
+                    break
+                elif recovery_choice in ['no', 'n']:
+                    recovery_enabled = False
+                    break
+                else:
+                    print("Invalid input. Please enter 'yes' or 'no'.")
+
+            recovery_multiplier = 2.0
+            if recovery_enabled:
+                # Get recovery multiplier
+                while True:
+                    try:
+                        multiplier_input = safe_input("Enter recovery multiplier (how many times the expected interval to wait) [2.0]: ").strip()
+                        if not multiplier_input:
+                            recovery_multiplier = 2.0
+                            break
+                        recovery_multiplier = float(multiplier_input)
+                        if recovery_multiplier <= 0:
+                            print("Multiplier must be greater than 0. Please try again.")
+                        elif recovery_multiplier < 1.0:
+                            print("Warning: Multiplier less than 1.0 may cause very frequent recovery triggers.")
+                            confirm = safe_input("Continue with this value? (yes/no) [no]: ").lower().strip()
+                            if confirm in ['yes', 'y']:
+                                break
+                        else:
+                            break
+                    except ValueError:
+                        print("Invalid input. Please enter a number.")
+
             # Add region to list
             region_config = {
                 'name': region_name,
@@ -500,7 +539,9 @@ def get_ocr_configuration(window_id=None):
                 'action': action_config,
                 'scan_frequency': scan_frequency,
                 'cooldown': cooldown,
-                'confidence_threshold': confidence
+                'confidence_threshold': confidence,
+                'recovery_enabled': recovery_enabled,
+                'recovery_multiplier': recovery_multiplier
             }
 
             ocr_regions.append(region_config)
@@ -543,12 +584,23 @@ def ocr_task(region_config, target_window_id):
     scan_frequency = region_config.get('scan_frequency', 0.1)
     cooldown = region_config.get('cooldown', 0.6)
     confidence_threshold = region_config.get('confidence_threshold', 0.6)
+    
+    # Recovery mechanism configuration
+    recovery_enabled = region_config.get('recovery_enabled', True)
+    recovery_multiplier = region_config.get('recovery_multiplier', 2.0)
 
     # Initialize variables
     last_action_time = 0
     action_cooldown = False
     error_count = 0
     max_consecutive_errors = 5
+    
+    # Recovery mechanism variables
+    activation_times = []  # Store timestamps of last few activations
+    max_activation_history = 3  # Keep track of last 3 activations for timing calculation
+    last_recovery_check = 0
+    expected_interval = None
+    recovery_due_time = None
 
     print(f"OCR task started for region '{region_name}' (Interactor for window: {target_window_id}).")
     print(f"Monitoring for text patterns: {text_patterns}")
@@ -556,6 +608,9 @@ def ocr_task(region_config, target_window_id):
     print(f"Scan frequency: {scan_frequency} seconds")
     print(f"Cooldown: {cooldown} seconds")
     print(f"Confidence threshold: {confidence_threshold}")
+    print(f"Recovery mechanism: {'Enabled' if recovery_enabled else 'Disabled'}")
+    if recovery_enabled:
+        print(f"Recovery multiplier: {recovery_multiplier}x (will trigger after {recovery_multiplier}x the expected interval)")
 
     # Main OCR loop
     while script_running:
@@ -572,7 +627,40 @@ def ocr_task(region_config, target_window_id):
                 action_cooldown = False
                 print(f"Region '{region_name}': Cooldown ended")
 
-            # Capture and process the region
+            # Check recovery mechanism first (independent of cooldown state)
+            if recovery_enabled and expected_interval is not None and recovery_due_time is not None:
+                current_time = time.time()
+                if current_time >= recovery_due_time and not action_cooldown:
+                    print(f"Region '{region_name}': Recovery trigger activated! No action triggered for {current_time - activation_times[-1]:.2f}s (expected: {expected_interval * recovery_multiplier:.2f}s)")
+                    
+                    # Perform recovery action
+                    interactor_instance.activate()
+                    if perform_action(action_config, interactor_instance):
+                        print(f"Region '{region_name}': Recovery action performed")
+                        current_time = time.time()
+                        last_action_time = current_time
+                        action_cooldown = True
+                        
+                        # Update activation times and reset recovery timer
+                        activation_times.append(current_time)
+                        if len(activation_times) > max_activation_history:
+                            activation_times.pop(0)
+                        
+                        # Recalculate expected interval
+                        if len(activation_times) >= 2:
+                            intervals = []
+                            for i in range(1, len(activation_times)):
+                                intervals.append(activation_times[i] - activation_times[i-1])
+                            expected_interval = sum(intervals) / len(intervals)
+                            recovery_due_time = current_time + (expected_interval * recovery_multiplier)
+                        else:
+                            recovery_due_time = None
+                    else:
+                        print(f"Region '{region_name}': Recovery action failed")
+                        # Reset recovery timer even if action failed to prevent spam
+                        recovery_due_time = current_time + (expected_interval * recovery_multiplier)
+
+            # Capture and process the region (only when not in cooldown)
             if not action_cooldown:
                 # Capture the region
                 image = capture_region(interactor_instance, region_area)
@@ -600,8 +688,26 @@ def ocr_task(region_config, target_window_id):
                     interactor_instance.activate()  # Ensure window is active
                     if perform_action(action_config, interactor_instance):
                         print(f"Region '{region_name}': Action performed")
-                        last_action_time = time.time()
+                        current_time = time.time()
+                        last_action_time = current_time
                         action_cooldown = True
+                        
+                        # Update activation times for recovery mechanism
+                        if recovery_enabled:
+                            activation_times.append(current_time)
+                            # Keep only the last few activations
+                            if len(activation_times) > max_activation_history:
+                                activation_times.pop(0)
+                            
+                            # Calculate expected interval if we have enough data
+                            if len(activation_times) >= 2:
+                                # Calculate average interval between last activations
+                                intervals = []
+                                for i in range(1, len(activation_times)):
+                                    intervals.append(activation_times[i] - activation_times[i-1])
+                                expected_interval = sum(intervals) / len(intervals)
+                                recovery_due_time = current_time + (expected_interval * recovery_multiplier)
+                                print(f"Region '{region_name}': Recovery mechanism armed. Expected interval: {expected_interval:.2f}s, Recovery due at: {recovery_due_time - current_time:.2f}s from now")
                     else:
                         print(f"Region '{region_name}': Action failed")
 
@@ -693,12 +799,14 @@ def start_listener():
     print("  - Multiple monitoring regions")
     print("  - Customizable actions (clicks or key presses)")
     print("  - Adjustable timing and sensitivity")
+    print("  - Recovery mechanism for missed OCR conditions")
 
     print("\nConfiguration:")
     print("  - You'll be asked to select regions on screen to monitor")
     print("  - For each region, you'll specify text patterns to look for")
     print("  - You'll configure what action to take when text is detected")
     print("  - You can set timing parameters like scan frequency and cooldown")
+    print("  - Recovery mechanism can automatically trigger actions if OCR conditions are missed")
 
     print("\nControls:")
     print("  - Press F11 to configure and start/pause the script")
