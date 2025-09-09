@@ -790,7 +790,14 @@ def get_crafting_requests():
 
                 # Build and add tasks to the main queue
                 tasks_for_this_request = []
-                start_crafting_index = max(1, have_tier_index + 1) # Start from base (index 1) at minimum
+                # When have_tier_index is -1 (none/base), we want to start from the first available tier
+                # When have_tier_index is 0 or higher, we start from the next tier after what they have
+                if have_tier_index == -1:
+                    # Find the first non-tierless tier (usually "base" but could be different in custom configs)
+                    start_crafting_index = 1 if len(ordered_tiers) > 1 and ordered_tiers[0] == "tierless" else 0
+                else:
+                    start_crafting_index = have_tier_index + 1  # Start from tier after what they have
+                
                 for i in range(start_crafting_index, target_tier_index + 1):
                      current_tier_to_craft = ordered_tiers[i]
                      tasks_for_this_request.append((item, current_tier_to_craft))
@@ -882,7 +889,14 @@ def get_crafting_requests():
 
                     # Build and add tasks
                     tasks_for_this_request = []
-                    start_crafting_index = max(1, have_tier_index + 1) # Start from base (index 1) at minimum
+                    # When have_tier_index is -1 (h0 or none), we want to start from the first craftable tier
+                    # When have_tier_index is 0 or higher, we start from the next tier after what they have
+                    if have_tier_index == -1:
+                        # Find the first non-tierless tier (usually "base" but could be different in custom configs)
+                        start_crafting_index = 1 if len(ordered_tiers) > 1 and ordered_tiers[0] == "tierless" else 0
+                    else:
+                        start_crafting_index = have_tier_index + 1  # Start from tier after what they have
+                    
                     for i in range(start_crafting_index, target_tier_index + 1):
                         current_tier_to_craft = ordered_tiers[i]
                         tasks_for_this_request.append((item, current_tier_to_craft))

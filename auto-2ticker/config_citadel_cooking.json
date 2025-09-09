@@ -22,7 +22,9 @@
             },
             "scan_frequency": 0.1,
             "cooldown": 0.6,
-            "confidence_threshold": 0.6
+            "confidence_threshold": 0.6,
+            "recovery_enabled": false,
+            "recovery_multiplier": 2.0
         }
     ]
 }

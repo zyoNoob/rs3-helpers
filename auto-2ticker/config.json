@@ -9,22 +9,21 @@
                 153
             ],
             "text_patterns": [
-                "xp",
-                "#p"
+                "xp"
             ],
             "action": {
                 "type": "click_region",
                 "region": [
-                    820,
-                    416,
-                    80,
-                    73
+                    671,
+                    611,
+                    239,
+                    118
                 ]
             },
             "scan_frequency": 0.1,
             "cooldown": 0.6,
             "confidence_threshold": 0.6,
-            "recovery_enabled": true,
+            "recovery_enabled": false,
             "recovery_multiplier": 2.0
         }
     ]
