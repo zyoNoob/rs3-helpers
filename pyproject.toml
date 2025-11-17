@@ -33,8 +33,8 @@ members = [
 ]
 
 [tool.uv.sources]
-x11-window-interactor = { workspace = true }
 sapiagent = { workspace = true }
+x11-window-interactor = { workspace = true }
 scale-invariant-template-matching = { workspace = true }
 
 #[tool.uv.sources]

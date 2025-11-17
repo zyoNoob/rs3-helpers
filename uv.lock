@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.13"
 resolution-markers = [
     "sys_platform == 'darwin'",
@@ -2084,11 +2084,11 @@ requires-dist = [
     { name = "opencv-contrib-python" },
     { name = "pynput", specifier = ">=1.8.1" },
     { name = "sapiagent", editable = "x11-window-interactor/sapiagent-custom" },
-    { name = "scale-invariant-template-matching", editable = "scale-invariant-template-matching" },
+    { name = "scale-invariant-template-matching", virtual = "scale-invariant-template-matching" },
     { name = "torch", specifier = ">=2.9.1" },
     { name = "torchaudio", specifier = ">=2.9.1" },
     { name = "torchvision", specifier = ">=0.24.1" },
-    { name = "x11-window-interactor", editable = "x11-window-interactor" },
+    { name = "x11-window-interactor", virtual = "x11-window-interactor" },
 ]
 
 [[package]]
@@ -2144,7 +2144,7 @@ requires-dist = [
 [[package]]
 name = "scale-invariant-template-matching"
 version = "0.1.0"
-source = { editable = "scale-invariant-template-matching" }
+source = { virtual = "scale-invariant-template-matching" }
 dependencies = [
     { name = "opencv-contrib-python" },
     { name = "pip" },
@@ -2681,7 +2681,7 @@ wheels = [
 [[package]]
 name = "x11-window-interactor"
 version = "0.1.0"
-source = { editable = "x11-window-interactor" }
+source = { virtual = "x11-window-interactor" }
 dependencies = [
     { name = "combo" },
     { name = "matplotlib" },
