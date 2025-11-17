@@ -10,13 +10,32 @@ dependencies = [
     "ipykernel>=6.29.5",
     "ipython>=9.0.2",
     "ipywidgets>=8.1.5",
-    "jupyter-ai[all]>=2.31.2",
     "mss>=10.0.0",
     "notebook>=7.3.3",
     "opencv-contrib-python",
     "pynput>=1.8.1",
-    "python-xlib>=0.33",
+    "sapiagent",
+    "scale-invariant-template-matching",
+    "torch>=2.9.1",
+    "torchaudio>=2.9.1",
+    "torchvision>=0.24.1",
+    "x11-window-interactor",
 ]
+
+[[tool.uv.index]]
+url = "https://download.pytorch.org/whl/cu128"
+
+[tool.uv.workspace]
+members = [
+    "x11-window-interactor",
+    "x11-window-interactor/sapiagent-custom",
+    "scale-invariant-template-matching",
+]
+
+[tool.uv.sources]
+x11-window-interactor = { workspace = true }
+sapiagent = { workspace = true }
+scale-invariant-template-matching = { workspace = true }
 
 #[tool.uv.sources]
 #opencv-contrib-python = { url = "https://github.com/zyoNoob/scale-invariant-template-matching/raw/refs/heads/main/whl/opencv_contrib_python-4.11.0.86-cp313-cp313-linux_x86_64.whl" }
