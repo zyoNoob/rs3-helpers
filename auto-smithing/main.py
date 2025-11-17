@@ -12,9 +12,7 @@ from collections import Counter, deque
 from IPython.display import clear_output
 
 import sys, os
-sys.path.append("../x11-window-interactor")
 from x11_interactor import X11WindowInteractor
-sys.path.append("../scale-invariant-template-matching")
 from template_matching import ColorMatcher
 
 # Initialize mouse and keyboard controllers globally

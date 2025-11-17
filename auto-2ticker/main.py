@@ -11,8 +11,6 @@ import easyocr
 import pynput.keyboard as pkeyboard
 
 import sys
-sys.path.append("../x11-window-interactor")
-# Import the original X11WindowInteractor
 from x11_interactor import X11WindowInteractor
 
 # Initialize global variables

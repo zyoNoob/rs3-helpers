@@ -9,9 +9,7 @@ import pynput.keyboard as pkeyboard
 import cv2
 
 import sys
-sys.path.append("../x11-window-interactor")
 from x11_interactor import X11WindowInteractor
-sys.path.append("../scale-invariant-template-matching")
 from template_matching import ColorMatcher
 
 # Initialize global variables
